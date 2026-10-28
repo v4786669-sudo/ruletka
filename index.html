@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fake Roulette v1.0 — Ruletka z połączeniami</title>
+  <meta name="description" content="Fałszywa ruletka: koło losujące z ustawieniami połączeń, rund i wymuszania wyników.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%A1%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>🎡 FAKE ROULETTE</h1>
+    <span class="version">v1.0</span>
+    <button type="button" id="btn-settings" class="btn btn-ghost">⚙️ Ustawienia</button>
+  </header>
+
+  <main class="layout">
+    <section class="wheel-area">
+      <div class="wheel-wrap">
+        <canvas id="wheel" width="520" height="520"></canvas>
+        <div class="pointer" aria-hidden="true"></div>
+      </div>
+      <div id="result" class="result">Naciśnij „Rozpocznij grę”, aby zakręcić</div>
+      <div id="round-info" class="round-info"></div>
+      <div class="controls">
+        <button type="button" id="btn-spin" class="btn btn-primary">🎡 Rozpocznij grę</button>
+        <button type="button" id="btn-reset" class="btn">↺ Nowa gra</button>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <h2>📜 Historia rund</h2>
+      <ul id="history" class="history"></ul>
+    </aside>
+  </main>
+
+  <footer class="foot">🎭 Koło można ustawić: połączenia, rundy i wymuszanie wyników znajdziesz w ⚙️ Ustawieniach.</footer>
+
+  <!-- Okno ustawień -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-head">
+        <h2 id="settings-title">⚙️ Ustawienia ruletki</h2>
+        <button type="button" id="btn-close-settings" class="btn btn-ghost" aria-label="Zamknij">✕</button>
+      </div>
+      <div class="modal-body">
+        <section>
+          <h3>🎯 Wybory <span class="hint">— pola na kole</span></h3>
+          <div id="choices-list"></div>
+          <button type="button" id="btn-add-choice" class="btn btn-small">+ Dodaj wybór</button>
+        </section>
+
+        <section>
+          <h3>🔗 Połączenia <span class="hint">— gdy wypadnie A, następna runda da B</span></h3>
+          <div id="links-list"></div>
+          <button type="button" id="btn-add-link" class="btn btn-small">+ Dodaj połączenie</button>
+        </section>
+
+        <section>
+          <h3>🔢 Rundy <span class="hint">— ile obrotów w jednej grze (1–30)</span></h3>
+          <div class="rounds-row">
+            <button type="button" id="btn-rounds-minus" class="btn btn-small">−</button>
+            <input type="number" id="input-rounds" min="1" max="30" step="1" value="2">
+            <button type="button" id="btn-rounds-plus" class="btn btn-small">+</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>🎭 Wymuszanie wyników <span class="hint">— opcjonalne, najwyższy priorytet, liczy się od rundy 1</span></h3>
+          <div id="forced-list"></div>
+          <button type="button" id="btn-add-forced" class="btn btn-small">+ Wymuś wynik</button>
+        </section>
+      </div>
+      <div class="modal-foot">
+        <button type="button" id="btn-restore-defaults" class="btn btn-danger">Przywróć domyślne</button>
+        <button type="button" id="btn-save-settings" class="btn btn-primary">💾 Zapisz</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Podsumowanie gry -->
+  <div id="summary-overlay" class="overlay hidden">
+    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="summary-title">
+      <div class="modal-head">
+        <h2 id="summary-title">🏁 Koniec gry</h2>
+      </div>
+      <div class="modal-body">
+        <ol id="summary-list" class="history"></ol>
+      </div>
+      <div class="modal-foot" style="justify-content: flex-end;">
+        <button type="button" id="btn-summary-close" class="btn btn-primary">Zamknij</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script src="core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
