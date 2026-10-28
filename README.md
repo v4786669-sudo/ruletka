@@ -35,6 +35,12 @@ npm test
 # równoważnie: node --test test/core.test.js && node --check app.js && node --check core.js
 ```
 
+Smoke test UI (symulowany DOM, pełny przebieg gry Sofia → Wania):
+
+```bash
+npm run smoke
+```
+
 ## Publikacja
 
 Cała aplikacja to pliki statyczne: `index.html`, `styles.css`, `app.js`, `core.js`.

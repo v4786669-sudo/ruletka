@@ -5,7 +5,11 @@
   "description": "Fałszywa ruletka v1.0 — koło losujące z połączeniami, rundami i wymuszaniem wyników.",
   "scripts": {
     "test": "node --test test/core.test.js && node --check app.js && node --check core.js",
+    "smoke": "node test/smoke.js",
     "start": "python3 -m http.server 4173"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
 }
