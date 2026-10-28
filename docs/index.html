@@ -3,22 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fake Roulette v1.0 — Ruletka z połączeniami</title>
-  <meta name="description" content="Fałszywa ruletka: koło losujące z ustawieniami połączeń, rund i wymuszania wyników.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%A1%3C/text%3E%3C/svg%3E">
+  <title>Ruletka — Zakręć kołem i sprawdź swoje szczęście</title>
+  <meta name="description" content="Ruletka: zakręć kołem i sprawdź swoje szczęście.">
+  <meta name="theme-color" content="#0b3d2e">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%B0%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="topbar">
-    <h1>🎡 FAKE ROULETTE</h1>
-    <span class="version">v1.0</span>
-    <button type="button" id="btn-settings" class="btn btn-ghost">⚙️ Ustawienia</button>
+    <div class="brand">
+      <h1>Ruletka</h1>
+      <p class="tagline">Zakręć kołem i sprawdź swoje szczęście</p>
+    </div>
+    <span class="version">v1.1</span>
   </header>
 
   <main class="layout">
     <section class="wheel-area">
       <div class="wheel-wrap">
-        <canvas id="wheel" width="520" height="520"></canvas>
+        <canvas id="wheel" width="520" height="520" role="img" aria-label="Koło ruletki"></canvas>
         <div class="pointer" aria-hidden="true"></div>
       </div>
       <div id="result" class="result">Naciśnij „Rozpocznij grę”, aby zakręcić</div>
@@ -35,9 +38,9 @@
     </aside>
   </main>
 
-  <footer class="foot">🎭 Koło można ustawić: połączenia, rundy i wymuszanie wyników znajdziesz w ⚙️ Ustawieniach.</footer>
+  <footer class="foot">© Ruletka v1.1</footer>
 
-  <!-- Okno ustawień -->
+  <!-- Okno ustawień (dostępne tylko dla właściciela) -->
   <div id="settings-overlay" class="overlay hidden">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="modal-head">

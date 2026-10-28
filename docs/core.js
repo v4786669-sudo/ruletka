@@ -1,11 +1,6 @@
 /*!
- * Fake Roulette v1.0 — logika rdzenia (czysta, testowalna).
+ * Ruletka v1.1 — logika rdzenia (czysta, testowalna).
  * UMD: przeglądarka (window.RouletteCore) i Node (module.exports).
- *
- * Priorytet ustalania wyniku rundy:
- *   1. wymuszenie (config.forced[i]),
- *   2. połączenie z poprzedniego wyniku (pierwsze pasujące "from" wygrywa),
- *   3. losowanie.
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {

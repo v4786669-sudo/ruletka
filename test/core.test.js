@@ -1,7 +1,7 @@
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const Core = require("../core.js");
+const Core = require("../docs/core.js");
 
 test("normalizeConfig: przycina i deduplikuje wybory", () => {
   const cfg = Core.normalizeConfig({ choices: [" Sofia ", "Sofia", "Wania", ""], links: [], rounds: 1, forced: [] });

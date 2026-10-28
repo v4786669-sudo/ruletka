@@ -1,12 +1,12 @@
 {
-  "name": "fake-roulette",
-  "version": "1.0.0",
+  "name": "ruletka",
+  "version": "1.1.0",
   "private": true,
-  "description": "Fałszywa ruletka v1.0 — koło losujące z połączeniami, rundami i wymuszaniem wyników.",
+  "description": "Ruletka v1.1 — strona WWW z kołem losującym (HTML/CSS/JS, canvas).",
   "scripts": {
-    "test": "node --test test/core.test.js && node --check app.js && node --check core.js",
+    "test": "node --test test/core.test.js && node --check docs/app.js && node --check docs/core.js",
     "smoke": "node test/smoke.js",
-    "start": "python3 -m http.server 4173"
+    "start": "python3 -m http.server 4173 -d docs"
   },
   "license": "UNLICENSED",
   "devDependencies": {
