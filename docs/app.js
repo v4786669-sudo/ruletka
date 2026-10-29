@@ -1,24 +1,23 @@
-/* Ruletka v1.1 — interfejs, animacja koła i tryb właściciela.
+/* Ruletka v1.2 — interfejs, animacja koła i ustawienia.
  * Koło rysowane na canvasie w stylu ruletki kasynowej (czerwone/czarne
  * segmenty, drewniano-złota obręcz, złota strzałka). Logika gry: core.js.
- * Ustawienia są ukryte przed graczami — właściciel otwiera je sekretem:
- * 5 szybkich kliknięć w piastę koła (okno 2,5 s). Po otwarciu ustawień
- * w sesji (ownerMode) historia i podsumowanie pokazują źródła wyników.
+ * Ustawienia otwiera przycisk „⚙️” w prawym górnym rogu. Kliknięcie
+ * „Start” odgrywa automatycznie całą sekwencję rund (kolejność = pary
+ * z ustawień): animacja ~4,2 s → „Wypadło: X” + ding → pauza ~1,4 s →
+ * następna runda… Po końcu sekwencji Start jest znów aktywny.
  */
 (function () {
   "use strict";
 
   var Core = window.RouletteCore;
 
-  var STORAGE_KEY = "ruletka-v1";
-  var SECRET_WINDOW_MS = 2500;
-  var SECRET_CLICKS_NEEDED = 5;
+  var STORAGE_KEY = "ruletka-v2";
+  var LEGACY_KEY = "ruletka-v1";
+  var PAUSE_MS = 1400;
 
   var DEFAULT_CONFIG = {
-    choices: ["Sofia", "Wania", "Julia", "Maja", "Zuzia", "Oliwia"],
-    links: [{ from: "Sofia", to: "Wania" }],
-    rounds: 2,
-    forced: []
+    choices: ["Wania", "Sofia", "Lena", "Mateusz", "Julia", "Maja"],
+    pairs: [{ a: "Wania", b: "Sofia" }]
   };
 
   var SEG_COLORS = ["#b71c1c", "#1c1c1c"]; // naprzemiennie czerwone/czarne
@@ -32,33 +31,50 @@
   var ctx = canvas.getContext("2d");
 
   var config = loadConfig();
-  var game = null;      // { results, index, rounds } — sekwencja całej gry ustalana przy starcie
-  var spinning = false;
+  var game = null;      // { results: [{name, source}], index, rounds }
+  var spinning = false; // koło w ruchu (jedna animacja)
+  var playing = false;  // cała sekwencja rund w toku (łącznie z pauzami)
   var angle = 0;        // bieżący kąt obrotu koła (radiany)
   var size = 0;         // rozmiar canvasu w pikselach CSS
   var dpr = window.devicePixelRatio || 1;
   var draft = null;     // kopia ustawień edytowana w oknie ustawień
-  var ownerMode = false;      // true po otwarciu ustawień w tej sesji
-  var historyEntries = [];    // [{ roundNo, res }] — do przerysowania z etykietami
-  var secretClicks = [];      // znaczniki czasu kliknięć w piastę
-  var hubRadius = 0;          // promień piasty ustawiany w drawWheel
+  var runId = 0;        // token przebiegu — unieważnia stare callbacki/pauzy
+  var pauseTimer = null;
 
   /* ================= konfiguracja / localStorage ================= */
 
-  // Migracja klucza starszej wersji: każdy inny klucz, którego nazwa zawiera
-  // „roulette” (dawny klucz wersji 1.0), jest przepisywany na nowy klucz i
-  // usuwany. Jeśli nowy klucz już istnieje, zostaje (nowsze dane wygrywają).
+  // Migracja starszych wersji: klucz v1.1 (i ewentualne starsze) są
+  // przepisywane na „ruletka-v2” — wybory bierzemy, połączenia zamieniamy
+  // na pary (puste pomijamy), resztę ignorujemy — a stary klucz usuwamy.
+  // Jeśli nowy klucz już istnieje, zostaje (nowsze dane wygrywają).
   function migrateLegacyStorage() {
     try {
       var keys = Object.keys(localStorage);
       for (var i = 0; i < keys.length; i++) {
         var k = keys[i];
-        if (k !== STORAGE_KEY && String(k).toLowerCase().indexOf("roulette") >= 0) {
-          if (localStorage.getItem(STORAGE_KEY) == null) {
-            localStorage.setItem(STORAGE_KEY, localStorage.getItem(k));
+        if (k === STORAGE_KEY) continue;
+        var isLegacy = k === LEGACY_KEY || String(k).toLowerCase().indexOf("roulette") >= 0;
+        if (!isLegacy) continue;
+        if (localStorage.getItem(STORAGE_KEY) == null) {
+          var old = null;
+          try { old = JSON.parse(localStorage.getItem(k)); } catch (e) { old = null; }
+          var pairs = [];
+          if (old && Array.isArray(old.links)) {
+            for (var j = 0; j < old.links.length; j++) {
+              var l = old.links[j];
+              if (!l || typeof l !== "object") continue;
+              var a = String(l.from == null ? "" : l.from).trim();
+              var b = String(l.to == null ? "" : l.to).trim();
+              if (!a || !b) continue;
+              pairs.push({ a: a, b: b });
+            }
           }
-          localStorage.removeItem(k);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            choices: (old && Array.isArray(old.choices)) ? old.choices : [],
+            pairs: pairs
+          }));
         }
+        localStorage.removeItem(k);
       }
     } catch (e) { /* brak dostępu do localStorage — ignorujemy */ }
   }
@@ -69,9 +85,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch (e) { saved = null; }
     var cfg = Core.normalizeConfig({
       choices: (saved && saved.choices) || DEFAULT_CONFIG.choices,
-      links: (saved && saved.links) || DEFAULT_CONFIG.links,
-      rounds: saved && saved.rounds != null ? saved.rounds : DEFAULT_CONFIG.rounds,
-      forced: (saved && saved.forced) || DEFAULT_CONFIG.forced
+      pairs: (saved && saved.pairs) || DEFAULT_CONFIG.pairs
     });
     if (cfg.choices.length === 0) cfg.choices = DEFAULT_CONFIG.choices.slice();
     return cfg;
@@ -81,9 +95,7 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         choices: config.choices,
-        links: config.links,
-        rounds: config.rounds,
-        forced: config.forced
+        pairs: config.pairs
       }));
     } catch (e) { /* brak dostępu do localStorage — ignorujemy */ }
   }
@@ -130,7 +142,6 @@
     var rimInner = rimOuter - rimW;
     var wheelR = rimInner - 2;
     var hubR = wheelR * 0.17;
-    hubRadius = hubR;
     var n = config.choices.length;
 
     drawRim(cx, cy, rimOuter, rimInner, n);
@@ -402,82 +413,73 @@
 
   /* ================= przebieg gry ================= */
 
-  function sourceLabel(res) {
-    if (!res) return "losowo";
-    if (res.source === "forced") return "wymuszone";
-    if (res.source === "link") return "połączenie: " + res.link.from + " → " + res.link.to;
-    return "losowo";
-  }
-
-  function badgeClass(res) {
-    return "badge badge-" + (res ? res.source : "random");
-  }
-
   function updateButtons() {
     var btn = $("btn-spin");
-    btn.disabled = spinning || config.choices.length === 0;
-    if (game == null) {
-      btn.textContent = "🎡 Rozpocznij grę" + (config.rounds === 1 ? "" : " (" + config.rounds + " rund)");
-    } else if (game.index + 1 >= game.rounds) {
-      btn.textContent = "🎡 Nowa gra";
-    } else {
-      btn.textContent = "🎡 Zakręć (runda " + (game.index + 2) + "/" + game.rounds + ")";
-    }
+    btn.disabled = playing || spinning || config.choices.length === 0;
+    // tekst przycisku zawsze „🎡 Start”
   }
 
   function updateRoundInfo() {
     var el = $("round-info");
-    if (game && game.index >= 0) {
-      el.textContent = "Runda " + (game.index + 1) + " z " + game.rounds;
+    if (game) {
+      el.textContent = "Runda " + Math.max(1, game.index + 1) + " z " + game.rounds;
     } else {
       el.textContent = "";
     }
   }
 
+  function setResult(text, win) {
+    var el = $("result");
+    el.textContent = text;
+    el.className = "result" + (win ? " win" : "");
+    if (win) {
+      el.classList.remove("pop");
+      void el.offsetWidth;
+      el.classList.add("pop");
+    }
+  }
+
   function onSpinClick() {
-    if (spinning) return;
+    if (playing || spinning) return; // chroni przed podwójnym startem
     if (config.choices.length === 0) {
       toast("⚠️ Koło nie ma wyborów");
       return;
     }
-    if (game == null || game.index + 1 >= game.rounds) {
-      startNewGame();
-      return;
-    }
-    spinTo(game.index + 1);
+    startGame();
   }
 
-  function startNewGame() {
-    var res = Core.runGame(config, Math.random);
-    game = { results: res.results, index: -1, rounds: res.rounds };
-    historyEntries = [];
-    renderHistory();
-    $("result").textContent = "Kręcimy…";
-    $("result").className = "result";
-    updateRoundInfo();
-    spinTo(0);
-  }
-
-  function resetGame() {
-    if (spinning) return;
-    game = null;
-    historyEntries = [];
-    renderHistory();
-    $("result").textContent = "Naciśnij „Rozpocznij grę”, aby zakręcić";
-    $("result").className = "result";
+  function startGame() {
+    runId++;
+    var id = runId;
+    clearTimeout(pauseTimer);
+    var seq = Core.buildSequence(config, Math.random);
+    game = { results: seq, index: -1, rounds: seq.length };
+    playing = true;
+    setResult("Kręcimy…", false);
     updateRoundInfo();
     updateButtons();
+    playNext(id);
   }
 
-  function spinTo(index) {
-    if (spinning || !game) return;
+  // Odgrywa kolejną rundę sekwencji albo kończy grę.
+  function playNext(id) {
+    if (id !== runId || !playing || !game) return;
+    var next = game.index + 1;
+    if (next >= game.rounds) {
+      finishGame();
+      return;
+    }
+    spinTo(next, id);
+  }
+
+  function spinTo(index, id) {
+    if (id !== runId || spinning || !game) return;
     var res = game.results[index];
-    if (!res) { onSpinLanded(index); return; }
+    if (!res) { onSpinLanded(index, id); return; }
     var choiceIndex = config.choices.indexOf(res.name);
     if (choiceIndex < 0) choiceIndex = 0;
-    $("result").textContent = "Kręcimy…";
-    $("result").className = "result";
-    animateSpin(choiceIndex, function () { onSpinLanded(index); });
+    setResult("Kręcimy…", false);
+    animateSpin(choiceIndex, function () { onSpinLanded(index, id); });
   }
 
   var TICK_TIMES = [0, 60, 130, 210, 300, 400, 510, 640, 790, 960, 1160, 1390, 1660, 1970, 2330];
@@ -519,73 +521,44 @@
         angle = finalAngle;
         drawWheel();
         spinning = false;
+        updateButtons();
         done();
       }
     }
     requestAnimationFrame(frame);
   }
 
-  function onSpinLanded(index) {
+  function onSpinLanded(index, id) {
+    if (id !== runId || !game) return;
     var res = game.results[index];
-    var name = res ? res.name : "?";
-    var el = $("result");
-    el.textContent = "Wypadło: " + name;
-    el.className = "result win";
-    el.classList.remove("pop");
-    void el.offsetWidth;
-    el.classList.add("pop");
+    var name = res && res.name ? res.name : "?";
+    setResult("Wypadło: " + name, true);
     game.index = index;
-    historyEntries.push({ roundNo: index + 1, res: res });
-    renderHistory();
     soundDing();
     updateRoundInfo();
+    if (index + 1 < game.rounds) {
+      pauseTimer = setTimeout(function () { playNext(id); }, PAUSE_MS);
+    } else {
+      finishGame();
+    }
     updateButtons();
-    if (game.index + 1 >= game.rounds) {
-      setTimeout(showSummary, 1000);
-    }
   }
 
-  // Historia rund: domyślnie tylko „Runda N — Imię”; etykiety źródeł
-  // (wymuszone/połączenie) są widoczne wyłącznie w trybie właściciela.
-  function buildHistoryItem(roundNo, res) {
-    var li = document.createElement("li");
-    var num = document.createElement("span");
-    num.className = "h-round";
-    num.textContent = "Runda " + roundNo + " —";
-    var name = document.createElement("span");
-    name.className = "h-name";
-    name.textContent = res ? res.name : "?";
-    li.appendChild(num);
-    li.appendChild(name);
-    if (ownerMode) {
-      var badge = document.createElement("span");
-      badge.className = badgeClass(res);
-      badge.textContent = sourceLabel(res);
-      li.appendChild(badge);
-    }
-    return li;
+  function finishGame() {
+    playing = false;
+    updateButtons();
+    // wynik ostatniej rundy zostaje na ekranie; Start jest znów aktywny
   }
 
-  function renderHistory() {
-    var ul = $("history");
-    ul.innerHTML = "";
-    for (var i = historyEntries.length - 1; i >= 0; i--) {
-      ul.appendChild(buildHistoryItem(historyEntries[i].roundNo, historyEntries[i].res));
-    }
-  }
-
-  // Podsumowanie: domyślnie lista wyników; źródła widoczne w trybie właściciela.
-  function showSummary() {
-    var ol = $("summary-list");
-    ol.innerHTML = "";
-    for (var i = 0; i < game.results.length; i++) {
-      var r = game.results[i];
-      var li = document.createElement("li");
-      li.textContent = "Runda " + (i + 1) + " — " + (r ? r.name : "?") +
-        (ownerMode ? " (" + sourceLabel(r) + ")" : "");
-      ol.appendChild(li);
-    }
-    $("summary-overlay").classList.remove("hidden");
+  // Zatrzymuje przebieg (używane przy zapisie nowych ustawień).
+  function resetPlayState() {
+    runId++;
+    clearTimeout(pauseTimer);
+    playing = false;
+    game = null;
+    setResult("Naciśnij „Start”, aby zakręcić", false);
+    updateRoundInfo();
+    updateButtons();
   }
 
   /* ================= dźwięk (WebAudio, bez plików) ================= */
@@ -635,9 +608,7 @@
   function openSettings() {
     draft = {
       choices: config.choices.slice(),
-      links: config.links.map(function (l) { return { from: l.from, to: l.to }; }),
-      rounds: config.rounds,
-      forced: config.forced.slice()
+      pairs: config.pairs.map(function (p) { return { a: p.a, b: p.b }; })
     };
     renderSettings();
     $("settings-overlay").classList.remove("hidden");
@@ -650,9 +621,7 @@
 
   function renderSettings() {
     renderChoices();
-    renderLinks();
-    renderForced();
-    $("input-rounds").value = draft.rounds;
+    renderPairs();
   }
 
   function renderChoices() {
@@ -678,8 +647,7 @@
       del.addEventListener("click", function () {
         var removed = draft.choices[i];
         draft.choices.splice(i, 1);
-        draft.links = draft.links.filter(function (l) { return l.from !== removed && l.to !== removed; });
-        draft.forced = draft.forced.map(function (f) { return f === removed ? null : f; });
+        draft.pairs = draft.pairs.filter(function (p) { return p.a !== removed && p.b !== removed; });
         renderSettings();
       });
 
@@ -689,79 +657,79 @@
     });
   }
 
+  // Select z bezpieczną obsługą null i pustej listy opcji.
   function makeSelect(options, value, onChange) {
     var sel = document.createElement("select");
+    var v = value == null ? "" : String(value);
     var vals = options.slice();
-    if (value && vals.indexOf(value) < 0) vals.push(value);
-    vals.forEach(function (v) {
+    if (v && vals.indexOf(v) < 0) vals.push(v);
+    if (vals.length === 0) vals.push("");
+    vals.forEach(function (x) {
       var opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = v;
+      opt.value = x;
+      opt.textContent = x === "" ? "—" : x;
       sel.appendChild(opt);
     });
-    sel.value = value;
+    sel.value = v;
     sel.addEventListener("change", function () { onChange(sel.value); });
     return sel;
   }
 
-  function renderLinks() {
-    var box = $("links-list");
+  function renderPairs() {
+    var box = $("pairs-list");
     box.innerHTML = "";
-    if (draft.links.length === 0) {
+    if (draft.pairs.length === 0) {
       var empty = document.createElement("div");
       empty.className = "hint";
-      empty.textContent = "Brak połączeń. Połączenie działa tak: gdy wypadnie A, następna runda na pewno wylosuje B.";
+      empty.textContent = "Brak rund. Kliknij „+ Dodaj rundę”, aby ułożyć kolejność obrotów.";
       box.appendChild(empty);
     }
-    draft.links.forEach(function (link, i) {
+    draft.pairs.forEach(function (pair, i) {
       var row = document.createElement("div");
       row.className = "row";
-      row.appendChild(makeSelect(draft.choices, link.from, function (v) { draft.links[i].from = v; }));
+      row.appendChild(makeSelect(draft.choices, pair.a, function (v) { draft.pairs[i].a = v; }));
       var arrow = document.createElement("span");
       arrow.className = "arrow";
       arrow.textContent = "→";
       row.appendChild(arrow);
-      row.appendChild(makeSelect(draft.choices, link.to, function (v) { draft.links[i].to = v; }));
-      var del = document.createElement("button");
-      del.type = "button";
-      del.className = "btn btn-small";
-      del.textContent = "✕";
-      del.title = "Usuń połączenie";
-      del.addEventListener("click", function () {
-        draft.links.splice(i, 1);
-        renderSettings();
-      });
-      row.appendChild(del);
-      box.appendChild(row);
-    });
-  }
+      row.appendChild(makeSelect(draft.choices, pair.b, function (v) { draft.pairs[i].b = v; }));
 
-  function renderForced() {
-    var box = $("forced-list");
-    box.innerHTML = "";
-    if (draft.forced.length === 0) {
-      var empty = document.createElement("div");
-      empty.className = "hint";
-      empty.textContent = "Brak wymuszeń — wszystkie rundy losują się naturalnie (z uwzględnieniem połączeń).";
-      box.appendChild(empty);
-    }
-    draft.forced.forEach(function (name, i) {
-      var row = document.createElement("div");
-      row.className = "row";
-      var tag = document.createElement("span");
-      tag.className = "forced-round";
-      tag.textContent = "Runda " + (i + 1) + ":";
-      row.appendChild(tag);
-      row.appendChild(makeSelect(draft.choices, name, function (v) { draft.forced[i] = v; }));
+      var up = document.createElement("button");
+      up.type = "button";
+      up.className = "btn btn-small";
+      up.textContent = "↑";
+      up.title = "Przesuń w górę";
+      up.disabled = i === 0;
+      up.addEventListener("click", function () {
+        var p = draft.pairs.splice(i, 1)[0];
+        draft.pairs.splice(i - 1, 0, p);
+        renderSettings();
+      });
+
+      var down = document.createElement("button");
+      down.type = "button";
+      down.className = "btn btn-small";
+      down.textContent = "↓";
+      down.title = "Przesuń w dół";
+      down.disabled = i === draft.pairs.length - 1;
+      down.addEventListener("click", function () {
+        var p = draft.pairs.splice(i, 1)[0];
+        draft.pairs.splice(i + 1, 0, p);
+        renderSettings();
+      });
+
       var del = document.createElement("button");
       del.type = "button";
       del.className = "btn btn-small";
       del.textContent = "✕";
-      del.title = "Usuń wymuszenie";
+      del.title = "Usuń rundę";
       del.addEventListener("click", function () {
-        draft.forced.splice(i, 1);
+        draft.pairs.splice(i, 1);
         renderSettings();
       });
+
+      row.appendChild(up);
+      row.appendChild(down);
       row.appendChild(del);
       box.appendChild(row);
     });
@@ -770,9 +738,7 @@
   function saveSettings() {
     var cfg = Core.normalizeConfig({
       choices: draft.choices,
-      links: draft.links,
-      rounds: draft.rounds,
-      forced: draft.forced
+      pairs: draft.pairs
     });
     if (cfg.choices.length === 0) {
       toast("⚠️ Dodaj co najmniej jeden wybór");
@@ -785,7 +751,7 @@
     config = cfg;
     persistConfig();
     closeSettings();
-    resetGame();
+    resetPlayState();
     drawWheel();
     toast("✅ Ustawienia zapisane");
   }
@@ -801,52 +767,20 @@
     toastTimer = setTimeout(function () { t.classList.add("hidden"); }, 2600);
   }
 
-  /* ================= sekret: 5 kliknięć w piastę ================= */
-
-  // Detekcja przez getBoundingClientRect + clientX/clientY (nie offsetX/Y —
-  // testy symulują kliknięcia właśnie przez clientX/clientY, a w jsdom
-  // getBoundingClientRect zwraca 0). Liczy się odległość od środka koła:
-  // musi być ≤ promień piasty * 1,6. 5 kliknięć w oknie 2,5 s otwiera
-  // ustawienia i włącza tryb właściciela.
-  canvas.addEventListener("click", function (e) {
-    var rect = canvas.getBoundingClientRect();
-    var x = e.clientX - rect.left;
-    var y = e.clientY - rect.top;
-    var cx = size / 2;
-    var cy = size / 2;
-    var zone = (hubRadius || size * 0.15) * 1.6;
-    var dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
-    if (dist > zone) return;
-    var now = Date.now();
-    secretClicks.push(now);
-    while (secretClicks.length > 0 && now - secretClicks[0] > SECRET_WINDOW_MS) {
-      secretClicks.shift();
-    }
-    if (secretClicks.length >= SECRET_CLICKS_NEEDED) {
-      secretClicks.length = 0;
-      ownerMode = true;
-      renderHistory();
-      openSettings();
-      toast("Tryb właściciela");
-    }
-  });
-
   /* ================= zdarzenia ================= */
 
   document.addEventListener("pointerdown", ensureAudio);
   document.addEventListener("keydown", ensureAudio);
 
   $("btn-spin").addEventListener("click", onSpinClick);
-  $("btn-reset").addEventListener("click", resetGame);
+  $("btn-settings").addEventListener("click", openSettings);
   $("btn-close-settings").addEventListener("click", closeSettings);
   $("btn-save-settings").addEventListener("click", saveSettings);
 
   $("btn-restore-defaults").addEventListener("click", function () {
     draft = {
       choices: DEFAULT_CONFIG.choices.slice(),
-      links: DEFAULT_CONFIG.links.map(function (l) { return { from: l.from, to: l.to }; }),
-      rounds: DEFAULT_CONFIG.rounds,
-      forced: []
+      pairs: DEFAULT_CONFIG.pairs.map(function (p) { return { a: p.a, b: p.b }; })
     };
     renderSettings();
     toast("Przywrócono domyślne — kliknij „Zapisz”");
@@ -857,62 +791,21 @@
     renderSettings();
   });
 
-  $("btn-add-link").addEventListener("click", function () {
+  $("btn-add-pair").addEventListener("click", function () {
     if (draft.choices.length < 2) {
-      toast("⚠️ Do połączenia potrzebne są co najmniej 2 wybory");
+      toast("⚠️ Do rundy potrzebne są co najmniej 2 wybory");
       return;
     }
-    var from = draft.choices[0];
-    var to = draft.choices[1] || draft.choices[0];
-    draft.links.push({ from: from, to: to });
+    draft.pairs.push({ a: draft.choices[0], b: draft.choices[1] });
     renderSettings();
-  });
-
-  $("btn-add-forced").addEventListener("click", function () {
-    if (draft.choices.length === 0) {
-      toast("⚠️ Najpierw dodaj wybory");
-      return;
-    }
-    draft.forced.push(draft.choices[0]);
-    renderSettings();
-  });
-
-  $("btn-rounds-minus").addEventListener("click", function () {
-    draft.rounds = Math.max(1, draft.rounds - 1);
-    $("input-rounds").value = draft.rounds;
-  });
-
-  $("btn-rounds-plus").addEventListener("click", function () {
-    draft.rounds = Math.min(30, draft.rounds + 1);
-    $("input-rounds").value = draft.rounds;
-  });
-
-  $("input-rounds").addEventListener("input", function () {
-    var v = parseInt(this.value, 10);
-    if (!isNaN(v)) draft.rounds = Math.min(30, Math.max(1, v));
-  });
-
-  $("btn-summary-close").addEventListener("click", function () {
-    $("summary-overlay").classList.add("hidden");
-    resetGame();
   });
 
   $("settings-overlay").addEventListener("click", function (e) {
     if (e.target === this) closeSettings();
   });
 
-  $("summary-overlay").addEventListener("click", function (e) {
-    if (e.target === this) {
-      this.classList.add("hidden");
-      resetGame();
-    }
-  });
-
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") {
-      $("summary-overlay").classList.add("hidden");
-      closeSettings();
-    }
+    if (e.key === "Escape") closeSettings();
   });
 
   window.addEventListener("resize", resizeCanvas);

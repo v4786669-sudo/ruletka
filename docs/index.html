@@ -15,7 +15,8 @@
       <h1>Ruletka</h1>
       <p class="tagline">Zakręć kołem i sprawdź swoje szczęście</p>
     </div>
-    <span class="version">v1.1</span>
+    <span class="version">v1.2</span>
+    <button type="button" id="btn-settings" class="btn btn-ghost settings-btn" title="Ustawienia" aria-label="Ustawienia">⚙️</button>
   </header>
 
   <main class="layout">
@@ -24,23 +25,17 @@
         <canvas id="wheel" width="520" height="520" role="img" aria-label="Koło ruletki"></canvas>
         <div class="pointer" aria-hidden="true"></div>
       </div>
-      <div id="result" class="result">Naciśnij „Rozpocznij grę”, aby zakręcić</div>
+      <div id="result" class="result">Naciśnij „Start”, aby zakręcić</div>
       <div id="round-info" class="round-info"></div>
       <div class="controls">
-        <button type="button" id="btn-spin" class="btn btn-primary">🎡 Rozpocznij grę</button>
-        <button type="button" id="btn-reset" class="btn">↺ Nowa gra</button>
+        <button type="button" id="btn-spin" class="btn btn-primary">🎡 Start</button>
       </div>
     </section>
-
-    <aside class="panel">
-      <h2>📜 Historia rund</h2>
-      <ul id="history" class="history"></ul>
-    </aside>
   </main>
 
-  <footer class="foot">© Ruletka v1.1</footer>
+  <footer class="foot">© Ruletka v1.2</footer>
 
-  <!-- Okno ustawień (dostępne tylko dla właściciela) -->
+  <!-- Okno ustawień -->
   <div id="settings-overlay" class="overlay hidden">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="modal-head">
@@ -55,44 +50,14 @@
         </section>
 
         <section>
-          <h3>🔗 Połączenia <span class="hint">— gdy wypadnie A, następna runda da B</span></h3>
-          <div id="links-list"></div>
-          <button type="button" id="btn-add-link" class="btn btn-small">+ Dodaj połączenie</button>
-        </section>
-
-        <section>
-          <h3>🔢 Rundy <span class="hint">— ile obrotów w jednej grze (1–30)</span></h3>
-          <div class="rounds-row">
-            <button type="button" id="btn-rounds-minus" class="btn btn-small">−</button>
-            <input type="number" id="input-rounds" min="1" max="30" step="1" value="2">
-            <button type="button" id="btn-rounds-plus" class="btn btn-small">+</button>
-          </div>
-        </section>
-
-        <section>
-          <h3>🎭 Wymuszanie wyników <span class="hint">— opcjonalne, najwyższy priorytet, liczy się od rundy 1</span></h3>
-          <div id="forced-list"></div>
-          <button type="button" id="btn-add-forced" class="btn btn-small">+ Wymuś wynik</button>
+          <h3>🎰 Kolejność rund <span class="hint">— każda para to 2 obroty: najpierw pierwsze imię, potem drugie</span></h3>
+          <div id="pairs-list"></div>
+          <button type="button" id="btn-add-pair" class="btn btn-small">+ Dodaj rundę</button>
         </section>
       </div>
       <div class="modal-foot">
         <button type="button" id="btn-restore-defaults" class="btn btn-danger">Przywróć domyślne</button>
         <button type="button" id="btn-save-settings" class="btn btn-primary">💾 Zapisz</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Podsumowanie gry -->
-  <div id="summary-overlay" class="overlay hidden">
-    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="summary-title">
-      <div class="modal-head">
-        <h2 id="summary-title">🏁 Koniec gry</h2>
-      </div>
-      <div class="modal-body">
-        <ol id="summary-list" class="history"></ol>
-      </div>
-      <div class="modal-foot" style="justify-content: flex-end;">
-        <button type="button" id="btn-summary-close" class="btn btn-primary">Zamknij</button>
       </div>
     </div>
   </div>

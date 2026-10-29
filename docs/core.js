@@ -1,6 +1,10 @@
 /*!
- * Ruletka v1.1 — logika rdzenia (czysta, testowalna).
+ * Ruletka v1.2 — logika rdzenia (czysta, testowalna).
  * UMD: przeglądarka (window.RouletteCore) i Node (module.exports).
+ *
+ * Konfiguracja: { choices: string[], pairs: [{ a, b }, ...] }.
+ * Kolejność rund = kolejność par; każda para to 2 obroty (najpierw a, potem b).
+ * Brak par → jedna runda losowa.
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
@@ -19,7 +23,9 @@
 
   /**
    * Waliduje i normalizuje konfigurację.
-   * raw: { choices: string[], links: [{from,to}], rounds: number, forced: (string|null)[] }
+   * raw: { choices: string[], pairs: [{ a, b }, ...] }
+   * Wybory: przycinane i deduplikowane. Pary: a i b muszą być w choices;
+   * puste lub nieprawidłowe pary są odrzucane; duplikaty par dozwolone.
    */
   function normalizeConfig(raw) {
     raw = raw || {};
@@ -32,35 +38,20 @@
       }
     }
 
-    var links = [];
-    if (Array.isArray(raw.links)) {
-      for (var j = 0; j < raw.links.length; j++) {
-        var l = raw.links[j];
-        if (!l || typeof l !== "object") continue;
-        var from = String(l.from == null ? "" : l.from).trim();
-        var to = String(l.to == null ? "" : l.to).trim();
-        if (!from || !to || from === to) continue;
-        if (choices.indexOf(from) < 0 || choices.indexOf(to) < 0) continue;
-        var dup = false;
-        for (var k = 0; k < links.length; k++) {
-          if (links[k].from === from && links[k].to === to) { dup = true; break; }
-        }
-        if (!dup) links.push({ from: from, to: to });
+    var pairs = [];
+    if (Array.isArray(raw.pairs)) {
+      for (var j = 0; j < raw.pairs.length; j++) {
+        var p = raw.pairs[j];
+        if (!p || typeof p !== "object") continue;
+        var a = String(p.a == null ? "" : p.a).trim();
+        var b = String(p.b == null ? "" : p.b).trim();
+        if (!a || !b) continue;
+        if (choices.indexOf(a) < 0 || choices.indexOf(b) < 0) continue;
+        pairs.push({ a: a, b: b });
       }
     }
 
-    var rounds = clampInt(raw.rounds, 1, 30, 1);
-
-    var forced = [];
-    if (Array.isArray(raw.forced)) {
-      var limit = Math.min(raw.forced.length, rounds);
-      for (var m = 0; m < limit; m++) {
-        var fname = String(raw.forced[m] == null ? "" : raw.forced[m]).trim();
-        forced.push(choices.indexOf(fname) >= 0 ? fname : null);
-      }
-    }
-
-    return { choices: choices, links: links, rounds: rounds, forced: forced };
+    return { choices: choices, pairs: pairs };
   }
 
   /**
@@ -74,53 +65,32 @@
   }
 
   /**
-   * Ustala cel rundy i (indeksowanej od 0).
-   * Zwraca null (losowo), { name, source: "link", link } lub { name, source: "forced", link: null }.
+   * Buduje sekwencję rund całej gry: pary → [a1, b1, a2, b2, ...].
+   * Każda para = 2 obroty (najpierw a, potem b). Brak par → jedna runda
+   * losowa. Wynik rundy: { name, source: "para" | "losowo" }.
    */
-  function resolveSpinTarget(config, spinIndex, previousResults) {
-    if (!Number.isInteger(spinIndex) || spinIndex < 0) {
-      throw new Error("spinIndex musi być liczbą całkowitą >= 0");
-    }
-    if (Array.isArray(config.forced) && spinIndex < config.forced.length && config.forced[spinIndex]) {
-      return { name: config.forced[spinIndex], source: "forced", link: null };
-    }
-    if (spinIndex > 0 && Array.isArray(previousResults)) {
-      var prev = previousResults[spinIndex - 1];
-      if (prev && prev.name) {
-        var links = config.links || [];
-        for (var i = 0; i < links.length; i++) {
-          if (links[i].from === prev.name) {
-            return { name: links[i].to, source: "link", link: links[i] };
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Symuluje całą grę. Wyniki rundy: { name, source: "random"|"link"|"forced", link } | null.
-   */
-  function runGame(config, rng) {
+  function buildSequence(config, rng) {
     var r = rng || Math.random;
     var results = [];
-    for (var i = 0; i < config.rounds; i++) {
-      var target = resolveSpinTarget(config, i, results);
-      if (target) {
-        results.push({ name: target.name, source: target.source, link: target.link });
-      } else {
-        var name = pickRandom(config.choices, r);
-        results.push(name == null ? null : { name: name, source: "random", link: null });
-      }
+    var pairs = (config && Array.isArray(config.pairs)) ? config.pairs : [];
+
+    if (pairs.length === 0) {
+      var name = pickRandom((config && config.choices) || [], r);
+      results.push({ name: name, source: "losowo" });
+      return results;
     }
-    return { rounds: config.rounds, results: results };
+
+    for (var i = 0; i < pairs.length; i++) {
+      results.push({ name: pairs[i].a, source: "para" });
+      results.push({ name: pairs[i].b, source: "para" });
+    }
+    return results;
   }
 
   return {
     clampInt: clampInt,
     normalizeConfig: normalizeConfig,
     pickRandom: pickRandom,
-    resolveSpinTarget: resolveSpinTarget,
-    runGame: runGame
+    buildSequence: buildSequence
   };
 });

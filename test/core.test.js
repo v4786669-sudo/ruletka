@@ -1,89 +1,103 @@
 "use strict";
+/**
+ * Testy logiki v1.2 (docs/core.js):
+ *   - normalizeConfig {choices, pairs}: trim/dedup wyborów, walidacja par
+ *     (nieznane/puste odrzucane, duplikaty dozwolone),
+ *   - buildSequence: pary → [a1, b1, a2, b2, ...] z source „para”; brak par →
+ *     1 runda losowa (rng deterministyczny, source „losowo”),
+ *   - pickRandom: brzegi, clampInt.
+ */
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const Core = require("../docs/core.js");
 
 test("normalizeConfig: przycina i deduplikuje wybory", () => {
-  const cfg = Core.normalizeConfig({ choices: [" Sofia ", "Sofia", "Wania", ""], links: [], rounds: 1, forced: [] });
+  const cfg = Core.normalizeConfig({ choices: [" Sofia ", "Sofia", "Wania", "", "  "], pairs: [] });
   assert.deepEqual(cfg.choices, ["Sofia", "Wania"]);
 });
 
-test("normalizeConfig: odrzuca nieprawidłowe połączenia", () => {
+test("normalizeConfig: pary — nieznane/puste odrzucane, duplikaty dozwolone", () => {
   const cfg = Core.normalizeConfig({
     choices: ["Sofia", "Wania"],
-    links: [
-      { from: "Sofia", to: "Nieznana" },   // cel spoza wyborów
-      { from: "Sofia", to: "Sofia" },      // pętla do siebie
-      { from: "Sofia", to: "Wania" },
-      { from: "Sofia", to: "Wania" }       // duplikat
-    ],
-    rounds: 1,
-    forced: []
+    pairs: [
+      { a: "Sofia", b: "Wania" },
+      { a: "Sofia", b: "Wania" },    // duplikat — dozwolony
+      { a: "Nieznana", b: "Wania" }, // a spoza wyborów — odrzuć
+      { a: "Sofia", b: "X" },        // b spoza wyborów — odrzuć
+      { a: " ", b: "Wania" },        // a puste po trim — odrzuć
+      { a: "Sofia", b: "" },         // b puste — odrzuć
+      null                           // nie-obiekt — odrzuć
+    ]
   });
-  assert.deepEqual(cfg.links, [{ from: "Sofia", to: "Wania" }]);
+  assert.deepEqual(cfg.pairs, [
+    { a: "Sofia", b: "Wania" },
+    { a: "Sofia", b: "Wania" }
+  ]);
 });
 
-test("normalizeConfig: przycina liczbę rund do 1..30", () => {
-  assert.equal(Core.normalizeConfig({ rounds: 0 }).rounds, 1);
-  assert.equal(Core.normalizeConfig({ rounds: 99 }).rounds, 30);
-  assert.equal(Core.normalizeConfig({ rounds: "5" }).rounds, 5);
-  assert.equal(Core.normalizeConfig({ rounds: "x" }).rounds, 1);
-});
-
-test("normalizeConfig: wymuszenia obcinane do liczby rund i walidowane", () => {
-  const cfg = Core.normalizeConfig({ choices: ["Sofia"], rounds: 3, forced: ["Sofia", "X", "Sofia", "Sofia"] });
-  assert.deepEqual(cfg.forced, ["Sofia", null, "Sofia"]);
-});
-
-test("resolveSpinTarget: wymuszenie ma priorytet nad połączeniem", () => {
-  const config = { choices: ["a", "b"], links: [{ from: "a", to: "b" }], forced: ["b"] };
-  assert.deepEqual(Core.resolveSpinTarget(config, 0, []), { name: "b", source: "forced", link: null });
-});
-
-test("resolveSpinTarget: połączenie odpala się po wylosowaniu źródła", () => {
-  const config = { choices: ["a", "b"], links: [{ from: "a", to: "b" }], forced: [] };
-  assert.equal(Core.resolveSpinTarget(config, 0, []), null);
-  assert.deepEqual(Core.resolveSpinTarget(config, 1, [{ name: "a" }]), {
-    name: "b", source: "link", link: { from: "a", to: "b" }
+test("normalizeConfig: pary wymagają obu imion z wyborów", () => {
+  const cfg = Core.normalizeConfig({
+    choices: ["Sofia"],
+    pairs: [{ a: "Sofia", b: "Sofia" }, { a: "Sofia", b: "Wania" }]
   });
-  assert.equal(Core.resolveSpinTarget(config, 1, [{ name: "b" }]), null);
+  assert.deepEqual(cfg, { choices: ["Sofia"], pairs: [{ a: "Sofia", b: "Sofia" }] });
 });
 
-test("runGame: łańcuch połączeń a→b→c daje sekwencję a, b, c", () => {
-  const config = Core.normalizeConfig({
-    choices: ["a", "b", "c"],
-    links: [{ from: "a", to: "b" }, { from: "b", to: "c" }],
-    rounds: 3
+test("normalizeConfig: pusty/brakujący input → pusta konfiguracja", () => {
+  assert.deepEqual(Core.normalizeConfig(), { choices: [], pairs: [] });
+  assert.deepEqual(Core.normalizeConfig({}), { choices: [], pairs: [] });
+});
+
+test("buildSequence: pary → [a1, b1, a2, b2] z source „para”", () => {
+  const cfg = Core.normalizeConfig({
+    choices: ["Wania", "Sofia", "Lena", "Mateusz"],
+    pairs: [{ a: "Wania", b: "Sofia" }, { a: "Lena", b: "Mateusz" }]
   });
-  const game = Core.runGame(config, () => 0); // rng=0 → zawsze pierwszy wybór
-  assert.deepEqual(game.results.map(r => r.name), ["a", "b", "c"]);
-  assert.deepEqual(game.results.map(r => r.source), ["random", "link", "link"]);
+  assert.deepEqual(Core.buildSequence(cfg, () => 0), [
+    { name: "Wania", source: "para" },
+    { name: "Sofia", source: "para" },
+    { name: "Lena", source: "para" },
+    { name: "Mateusz", source: "para" }
+  ]);
 });
 
-test("runGame: wymuszenie przebija połączenie w rundzie 2", () => {
-  const config = Core.normalizeConfig({
-    choices: ["a", "b", "c"],
-    links: [{ from: "a", to: "b" }],
-    rounds: 2,
-    forced: [null, "c"]
+test("buildSequence: kolejność par = kolejność rund (rng nie ma wpływu)", () => {
+  const cfg = Core.normalizeConfig({
+    choices: ["Wania", "Sofia", "Lena", "Mateusz"],
+    pairs: [{ a: "Lena", b: "Mateusz" }, { a: "Wania", b: "Sofia" }]
   });
-  const game = Core.runGame(config, () => 0);
-  assert.deepEqual(game.results.map(r => r.name), ["a", "c"]);
-  assert.deepEqual(game.results.map(r => r.source), ["random", "forced"]);
+  assert.deepEqual(Core.buildSequence(cfg, () => 0).map((r) => r.name),
+    ["Lena", "Mateusz", "Wania", "Sofia"]);
 });
 
-test("runGame: pierwsze z kilku połączeń o tym samym źródle wygrywa", () => {
-  const config = Core.normalizeConfig({
-    choices: ["a", "b", "c"],
-    links: [{ from: "a", to: "b" }, { from: "a", to: "c" }],
-    rounds: 2
-  });
-  const game = Core.runGame(config, () => 0);
-  assert.deepEqual(game.results.map(r => r.name), ["a", "b"]);
+test("buildSequence: brak par → 1 runda losowa (rng deterministyczny, source „losowo”)", () => {
+  const cfg = Core.normalizeConfig({ choices: ["A", "B", "C"], pairs: [] });
+  assert.deepEqual(Core.buildSequence(cfg, () => 0), [{ name: "A", source: "losowo" }]);
+  assert.deepEqual(Core.buildSequence(cfg, () => 0.999), [{ name: "C", source: "losowo" }]);
 });
 
-test("pickRandom: rng=0 daje pierwszy element, wartości z brzegu są obcinane", () => {
+test("buildSequence: puste wybory i brak par → runda z name null", () => {
+  assert.deepEqual(Core.buildSequence(Core.normalizeConfig({ choices: [], pairs: [] }), () => 0),
+    [{ name: null, source: "losowo" }]);
+});
+
+test("pickRandom: rng=0 → pierwszy element, brzegi obcinane, pusta lista → null", () => {
   assert.equal(Core.pickRandom(["a", "b", "c"], () => 0), "a");
   assert.equal(Core.pickRandom(["a", "b", "c"], () => 0.999999), "c");
+  assert.equal(Core.pickRandom(["a", "b"], () => 1), "b");     // górny brzeg obcinany
+  assert.equal(Core.pickRandom(["a", "b"], () => -0.5), "a");  // ujemny obcinany
   assert.equal(Core.pickRandom([], () => 0), null);
+});
+
+test("clampInt: zaokrągla i obcina do zakresu, fallback dla nie-liczb", () => {
+  assert.equal(Core.clampInt("5", 1, 30, 1), 5);
+  assert.equal(Core.clampInt(99, 1, 30, 1), 30);
+  assert.equal(Core.clampInt(0, 1, 30, 1), 1);
+  assert.equal(Core.clampInt("x", 1, 30, 1), 1);
+});
+
+test("stare API v1.0/v1.1 usunięte, buildSequence istnieje", () => {
+  assert.equal(Core.resolveSpinTarget, undefined, "resolveSpinTarget nie istnieje w v1.2");
+  assert.equal(Core.runGame, undefined, "runGame nie istnieje w v1.2");
+  assert.equal(typeof Core.buildSequence, "function", "buildSequence istnieje");
 });
