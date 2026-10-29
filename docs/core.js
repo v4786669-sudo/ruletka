@@ -87,10 +87,45 @@
     return results;
   }
 
+  /**
+   * Kąt docelowy obrotu koła (radiany, wartość rosnąca), przy którym
+   * wskaźnik (góra koła, kąt ekranowy -π/2) wskazuje środek segmentu
+   * choiceIndex ± drobny losowy jitter wewnątrz segmentu.
+   * Geometria musi być zgodna z rysowaniem w app.js: segment i rysowany
+   * jest od kąta lokalnego -π/2 + i*seg, a płótno jest obracane o `angle`.
+   */
+  function targetAngleForSpin(choiceIndex, n, currentAngle, rng) {
+    if (!n || n <= 0) return currentAngle || 0;
+    var r = rng || Math.random;
+    var seg = (Math.PI * 2) / n;
+    var idx = Math.max(0, Math.min(n - 1, Math.floor(choiceIndex)));
+    var jitter = (r() - 0.5) * seg * 0.55;
+    var targetPointer = -Math.PI / 2 + idx * seg + seg / 2 + jitter;
+    var targetMod = (((-Math.PI / 2 - targetPointer) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    var baseMod = (((currentAngle || 0) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    var delta = (targetMod - baseMod + Math.PI * 2) % (Math.PI * 2);
+    var turns = Math.floor(5 + r() * 4) * Math.PI * 2; // 5–8 PEŁNYCH obrotów (wielokrotność 2π!)
+    return (currentAngle || 0) + delta + turns;
+  }
+
+  /**
+   * Indeks segmentu, na który wskazuje wskaźnik (góra koła) przy danym
+   * kącie obrotu. Odwrotność targetAngleForSpin — używana w testach
+   * własnościowych (koło graficzne musi lądować na segmencie celu).
+   */
+  function indexAtPointer(angle, n) {
+    if (!n || n <= 0) return -1;
+    var seg = (Math.PI * 2) / n;
+    var local = (((-Math.PI / 2 - angle) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    return Math.floor((local + Math.PI / 2) / seg) % n;
+  }
+
   return {
     clampInt: clampInt,
     normalizeConfig: normalizeConfig,
     pickRandom: pickRandom,
-    buildSequence: buildSequence
+    buildSequence: buildSequence,
+    targetAngleForSpin: targetAngleForSpin,
+    indexAtPointer: indexAtPointer
   };
 });

@@ -1,6 +1,6 @@
 {
   "name": "ruletka",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Ruletka v1.2 — strona WWW z kołem losującym (HTML/CSS/JS, canvas).",
   "scripts": {

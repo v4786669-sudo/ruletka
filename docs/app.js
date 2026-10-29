@@ -489,17 +489,10 @@
     updateButtons();
     ensureAudio();
 
-    var n = config.choices.length;
-    var seg = (Math.PI * 2) / n;
-    var rnd = Math.random();
-    // wskaźnik ma trafić w środek segmentu + drobny losowy rozrzut (wygląda naturalnie)
-    var targetPointer = choiceIndex * seg + seg / 2 + (rnd - 0.5) * seg * 0.55;
-
-    var targetMod = (((-Math.PI / 2 - targetPointer) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    var baseMod = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    var delta = (targetMod - baseMod + Math.PI * 2) % (Math.PI * 2);
-    var turns = (5 + Math.random() * 4) * Math.PI * 2; // 5–9 pełnych obrotów
-    var finalAngle = angle + delta + turns;
+    // Kąt docelowy liczony w core.js (jedno źródło prawdy geometrii
+    // lądowania): wskaźnik trafia w środek segmentu celu + drobny jitter,
+    // więc koło graficznie ląduje DOKŁADNIE na wybranym polu.
+    var finalAngle = Core.targetAngleForSpin(choiceIndex, config.choices.length, angle, Math.random);
 
     var start = angle;
     var duration = 4200;

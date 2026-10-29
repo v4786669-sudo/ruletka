@@ -101,3 +101,47 @@ test("stare API v1.0/v1.1 usunięte, buildSequence istnieje", () => {
   assert.equal(Core.runGame, undefined, "runGame nie istnieje w v1.2");
   assert.equal(typeof Core.buildSequence, "function", "buildSequence istnieje");
 });
+
+// ---------------------------------------------------------------------------
+// WŁASNOŚĆ KRYTYCZNA (regresja bugu „koło ląduje na innym polu niż wynik”):
+// dla dowolnej liczby segmentów i dowolnego celu, kąt docelowy liczony przez
+// targetAngleForSpin musi zawsze wskazywać DOKŁADNIE segment celu — wtedy
+// graficzne lądowanie pokrywa się z wynikiem ustawionym w konfiguracji.
+// ---------------------------------------------------------------------------
+
+test("targetAngleForSpin: wskaźnik zawsze ląduje na segmencie celu (własność)", () => {
+  let seed = 123456789;
+  const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (const n of [2, 3, 4, 5, 6, 8, 12, 16, 30]) {
+    let angle = Math.random() * 1000;
+    for (let i = 0; i < n; i++) {
+      for (let k = 0; k < 50; k++) {
+        const finalAngle = Core.targetAngleForSpin(i, n, angle, rng);
+        assert.equal(Core.indexAtPointer(finalAngle, n), i,
+          `n=${n} cel=${i} próba=${k} — koło wylądowało poza celem`);
+        angle = finalAngle; // kolejne obroty kumulują kąt jak w prawdziwej grze
+      }
+    }
+  }
+});
+
+test("targetAngleForSpin: jitter zostaje wewnątrz segmentu celu (bez przekroczenia krawędzi)", () => {
+  let seed = 987654321;
+  const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let k = 0; k < 500; k++) {
+    const finalAngle = Core.targetAngleForSpin(0, 6, 3.7, rng);
+    assert.equal(Core.indexAtPointer(finalAngle, 6), 0);
+  }
+});
+
+test("targetAngleForSpin/indexAtPointer: regresja bugu offsetu −π/2", () => {
+  // Stary (błędny) wzór bez offsetu −π/2 lądował o 1,5 segmentu dalej:
+  // cel=0 (Wania) trafiał wizualnie na segment 2 (Julia) przy 6 polach.
+  // Nowy wzór musi mapować cel=0 → segment 0.
+  assert.equal(Core.indexAtPointer(Core.targetAngleForSpin(0, 6, 0, () => 0.5), 6), 0);
+  assert.equal(Core.indexAtPointer(Core.targetAngleForSpin(2, 6, 0, () => 0.5), 6), 2);
+  assert.equal(Core.indexAtPointer(Core.targetAngleForSpin(5, 6, 0, () => 0.5), 6), 5);
+  // kąt zerowy wskazuje segment 0 (góra koła)
+  assert.equal(Core.indexAtPointer(0, 6), 0);
+  assert.equal(Core.indexAtPointer(0, 2), 0);
+});
