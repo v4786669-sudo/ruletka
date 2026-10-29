@@ -1,11 +1,14 @@
 "use strict";
 /**
- * Testy logiki v1.2 (docs/core.js):
- *   - normalizeConfig {choices, pairs}: trim/dedup wyborów, walidacja par
- *     (nieznane/puste odrzucane, duplikaty dozwolone),
+ * Testy logiki v1.3 (docs/core.js):
+ *   - normalizeConfig {choices, pairs, series}: trim/dedup wyborów, walidacja
+ *     par (nieznane/puste odrzucane, duplikaty dozwolone), series clamp 1–20,
  *   - buildSequence: pary → [a1, b1, a2, b2, ...] z source „para”; brak par →
  *     1 runda losowa (rng deterministyczny, source „losowo”),
- *   - pickRandom: brzegi, clampInt.
+ *   - flattenPairs, pickNextName (eliminacja: trafienia, pomijanie
+ *     wylosowanych, fallback losowy),
+ *   - pickRandom: brzegi, clampInt,
+ *   - targetAngleForSpin/indexAtPointer: geometria lądowania (własności).
  */
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
@@ -40,12 +43,12 @@ test("normalizeConfig: pary wymagają obu imion z wyborów", () => {
     choices: ["Sofia"],
     pairs: [{ a: "Sofia", b: "Sofia" }, { a: "Sofia", b: "Wania" }]
   });
-  assert.deepEqual(cfg, { choices: ["Sofia"], pairs: [{ a: "Sofia", b: "Sofia" }] });
+  assert.deepEqual(cfg, { choices: ["Sofia"], pairs: [{ a: "Sofia", b: "Sofia" }], series: 1 });
 });
 
 test("normalizeConfig: pusty/brakujący input → pusta konfiguracja", () => {
-  assert.deepEqual(Core.normalizeConfig(), { choices: [], pairs: [] });
-  assert.deepEqual(Core.normalizeConfig({}), { choices: [], pairs: [] });
+  assert.deepEqual(Core.normalizeConfig(), { choices: [], pairs: [], series: 1 });
+  assert.deepEqual(Core.normalizeConfig({}), { choices: [], pairs: [], series: 1 });
 });
 
 test("buildSequence: pary → [a1, b1, a2, b2] z source „para”", () => {
@@ -144,4 +147,74 @@ test("targetAngleForSpin/indexAtPointer: regresja bugu offsetu −π/2", () => {
   // kąt zerowy wskazuje segment 0 (góra koła)
   assert.equal(Core.indexAtPointer(0, 6), 0);
   assert.equal(Core.indexAtPointer(0, 2), 0);
+});
+
+// ---------------------------------------------------------------------------
+// v1.3: series, flattenPairs, pickNextName (eliminacja z koła)
+// ---------------------------------------------------------------------------
+
+test("normalizeConfig: series clamp 1–20, domyślnie 1", () => {
+  assert.equal(Core.normalizeConfig({ series: 0 }).series, 1);
+  assert.equal(Core.normalizeConfig({ series: 99 }).series, 20);
+  assert.equal(Core.normalizeConfig({ series: "3" }).series, 3);
+  assert.equal(Core.normalizeConfig({ series: "x" }).series, 1);
+  assert.equal(Core.normalizeConfig({}).series, 1);
+});
+
+test("normalizeConfig: series jest zwykłym enumerowalnym polem", () => {
+  const cfg = Core.normalizeConfig({ choices: ["Sofia", "Wania"], pairs: [] });
+  assert.deepEqual(Object.keys(cfg), ["choices", "pairs", "series"]);
+  assert.equal(cfg.series, 1);
+});
+
+test("flattenPairs: pary → [a1, b1, a2, b2], puste wpisy pomijane", () => {
+  assert.deepEqual(Core.flattenPairs([{ a: "Wania", b: "Sofia" }, { a: "Lena", b: "Mateusz" }]),
+    ["Wania", "Sofia", "Lena", "Mateusz"]);
+  assert.deepEqual(Core.flattenPairs([{ a: "", b: "Sofia" }, null, { a: "Lena" }]),
+    ["Sofia", "Lena"]);
+  assert.deepEqual(Core.flattenPairs([]), []);
+});
+
+test("pickNextName: trafienie w sekwencji od pos, pos=(idx+1)%len", () => {
+  const seq = ["Wania", "Sofia", "Lena", "Mateusz"];
+  const active = ["Sofia", "Lena", "Mateusz"]; // Wania już wylosowana
+  assert.deepEqual(Core.pickNextName(seq, 1, active, () => 0),
+    { name: "Sofia", source: "para", pos: 2 });
+  // trafienie na ostatnim elemencie → pos zawija się na 0
+  assert.deepEqual(Core.pickNextName(seq, 3, ["Mateusz"], () => 0),
+    { name: "Mateusz", source: "para", pos: 0 });
+});
+
+test("pickNextName: pomija imiona spoza active i zawija sekwencję", () => {
+  const seq = ["Wania", "Sofia"];
+  const active = ["Sofia"];
+  assert.deepEqual(Core.pickNextName(seq, 1, active, () => 0),
+    { name: "Sofia", source: "para", pos: 0 });
+  // od pos=0: „Wania” wylosowana → przechodzi do „Sofia”
+  assert.deepEqual(Core.pickNextName(seq, 0, active, () => 0),
+    { name: "Sofia", source: "para", pos: 0 });
+});
+
+test("pickNextName: pełne przejście bez trafienia → losowo z rng deterministycznym, pos bez zmian", () => {
+  const seq = ["Wania", "Sofia"];
+  const active = ["Lena", "Mateusz"]; // żadnego z seq nie ma już na kole
+  assert.deepEqual(Core.pickNextName(seq, 1, active, () => 0),
+    { name: "Lena", source: "losowo", pos: 1 });
+  assert.deepEqual(Core.pickNextName(seq, 1, active, () => 0.999),
+    { name: "Mateusz", source: "losowo", pos: 1 });
+});
+
+test("pickNextName: active puste → name null", () => {
+  assert.deepEqual(Core.pickNextName(["Wania"], 0, [], () => 0),
+    { name: null, source: "losowo", pos: 0 });
+});
+
+test("pickNextName: pusta sekwencja → losowo spośród active", () => {
+  assert.deepEqual(Core.pickNextName([], 0, ["A", "B"], () => 0),
+    { name: "A", source: "losowo", pos: 0 });
+});
+
+test("pickNextName: pos spoza zakresu → start od 0", () => {
+  assert.deepEqual(Core.pickNextName(["Wania", "Sofia"], 7, ["Wania"], () => 0),
+    { name: "Wania", source: "para", pos: 1 });
 });

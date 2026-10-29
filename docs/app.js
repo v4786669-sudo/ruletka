@@ -1,23 +1,21 @@
-/* Ruletka v1.2 — interfejs, animacja koła i ustawienia.
+/* Ruletka v1.3 — interfejs, animacja koła, eliminacja i serie.
  * Koło rysowane na canvasie w stylu ruletki kasynowej (czerwone/czarne
  * segmenty, drewniano-złota obręcz, złota strzałka). Logika gry: core.js.
- * Ustawienia otwiera przycisk „⚙️” w prawym górnym rogu. Kliknięcie
- * „Start” odgrywa automatycznie całą sekwencję rund (kolejność = pary
- * z ustawień): animacja ~4,2 s → „Wypadło: X” + ding → pauza ~1,4 s →
- * następna runda… Po końcu sekwencji Start jest znów aktywny.
+ * Jeden klik „Start” = jeden obrót. Wylosowane imię znika z koła
+ * (eliminacja); wynik pokazuje wielki overlay (klik/Escape zamyka).
+ * Gdy koło jest puste: kolejna seria z odnowionym kołem albo koniec gry.
  */
 (function () {
   "use strict";
 
   var Core = window.RouletteCore;
 
-  var STORAGE_KEY = "ruletka-v2";
-  var LEGACY_KEY = "ruletka-v1";
-  var PAUSE_MS = 1400;
+  var STORAGE_KEY = "ruletka-v3";
 
   var DEFAULT_CONFIG = {
     choices: ["Wania", "Sofia", "Lena", "Mateusz", "Julia", "Maja"],
-    pairs: [{ a: "Wania", b: "Sofia" }]
+    pairs: [{ a: "Wania", b: "Sofia" }],
+    series: 2
   };
 
   var SEG_COLORS = ["#b71c1c", "#1c1c1c"]; // naprzemiennie czerwone/czarne
@@ -31,21 +29,21 @@
   var ctx = canvas.getContext("2d");
 
   var config = loadConfig();
-  var game = null;      // { results: [{name, source}], index, rounds }
+  var activeChoices = config.choices.slice(); // imiona wciąż na kole
+  var game = null;      // { series, seq, seqPos, over }
   var spinning = false; // koło w ruchu (jedna animacja)
-  var playing = false;  // cała sekwencja rund w toku (łącznie z pauzami)
+  var overlayVisible = false;
   var angle = 0;        // bieżący kąt obrotu koła (radiany)
   var size = 0;         // rozmiar canvasu w pikselach CSS
   var dpr = window.devicePixelRatio || 1;
   var draft = null;     // kopia ustawień edytowana w oknie ustawień
-  var runId = 0;        // token przebiegu — unieważnia stare callbacki/pauzy
-  var pauseTimer = null;
+  var runId = 0;        // token przebiegu — unieważnia stare callbacki
 
   /* ================= konfiguracja / localStorage ================= */
 
-  // Migracja starszych wersji: klucz v1.1 (i ewentualne starsze) są
-  // przepisywane na „ruletka-v2” — wybory bierzemy, połączenia zamieniamy
-  // na pary (puste pomijamy), resztę ignorujemy — a stary klucz usuwamy.
+  // Migracja starszych wersji na „ruletka-v3”: wybory bierzemy, pary
+  // z klucza v2 (albo połączenia ze starszych — puste pomijamy),
+  // serie ustawiamy na 1, resztę ignorujemy. Stare klucze usuwamy.
   // Jeśli nowy klucz już istnieje, zostaje (nowsze dane wygrywają).
   function migrateLegacyStorage() {
     try {
@@ -53,13 +51,16 @@
       for (var i = 0; i < keys.length; i++) {
         var k = keys[i];
         if (k === STORAGE_KEY) continue;
-        var isLegacy = k === LEGACY_KEY || String(k).toLowerCase().indexOf("roulette") >= 0;
+        var isLegacy = k === "ruletka-v2" || k === "ruletka-v1" ||
+          String(k).toLowerCase().indexOf("roulette") >= 0;
         if (!isLegacy) continue;
         if (localStorage.getItem(STORAGE_KEY) == null) {
           var old = null;
           try { old = JSON.parse(localStorage.getItem(k)); } catch (e) { old = null; }
           var pairs = [];
-          if (old && Array.isArray(old.links)) {
+          if (old && Array.isArray(old.pairs)) {
+            pairs = old.pairs;
+          } else if (old && Array.isArray(old.links)) {
             for (var j = 0; j < old.links.length; j++) {
               var l = old.links[j];
               if (!l || typeof l !== "object") continue;
@@ -71,7 +72,8 @@
           }
           localStorage.setItem(STORAGE_KEY, JSON.stringify({
             choices: (old && Array.isArray(old.choices)) ? old.choices : [],
-            pairs: pairs
+            pairs: pairs,
+            series: 1
           }));
         }
         localStorage.removeItem(k);
@@ -85,7 +87,8 @@
     try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch (e) { saved = null; }
     var cfg = Core.normalizeConfig({
       choices: (saved && saved.choices) || DEFAULT_CONFIG.choices,
-      pairs: (saved && saved.pairs) || DEFAULT_CONFIG.pairs
+      pairs: (saved && saved.pairs) || DEFAULT_CONFIG.pairs,
+      series: saved && saved.series != null ? saved.series : DEFAULT_CONFIG.series
     });
     if (cfg.choices.length === 0) cfg.choices = DEFAULT_CONFIG.choices.slice();
     return cfg;
@@ -95,7 +98,8 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         choices: config.choices,
-        pairs: config.pairs
+        pairs: config.pairs,
+        series: config.series
       }));
     } catch (e) { /* brak dostępu do localStorage — ignorujemy */ }
   }
@@ -142,7 +146,7 @@
     var rimInner = rimOuter - rimW;
     var wheelR = rimInner - 2;
     var hubR = wheelR * 0.17;
-    var n = config.choices.length;
+    var n = activeChoices.length; // koło rysuje TYLKO aktywnych
 
     drawRim(cx, cy, rimOuter, rimInner, n);
 
@@ -156,7 +160,7 @@
       ctx.font = "600 15px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("Brak wyborów na kole", cx, cy);
+      ctx.fillText("Wszyscy wylosowani", cx, cy);
       ctx.restore();
       drawHub(cx, cy, hubR);
       return;
@@ -319,7 +323,7 @@
       var m = -Math.PI / 2 + i * seg + seg / 2;
       var wa = ((m + angle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
       var flip = Math.cos(wa) < 0; // lewa połowa → obróć o π, by tekst nie był do góry nogami
-      var fit = fitLabel(config.choices[i], baseSize, room * 0.92);
+      var fit = fitLabel(activeChoices[i], baseSize, room * 0.92);
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(wa);
@@ -415,71 +419,91 @@
 
   function updateButtons() {
     var btn = $("btn-spin");
-    btn.disabled = playing || spinning || config.choices.length === 0;
+    btn.disabled = spinning || config.choices.length === 0;
     // tekst przycisku zawsze „🎡 Start”
   }
 
   function updateRoundInfo() {
     var el = $("round-info");
-    if (game) {
-      el.textContent = "Runda " + Math.max(1, game.index + 1) + " z " + game.rounds;
+    if (game == null) {
+      el.textContent = "Naciśnij „Start”, aby zakręcić";
+    } else if (game.over) {
+      el.textContent = "Koniec gry — kliknij Start";
     } else {
-      el.textContent = "";
+      el.textContent = "Seria " + game.series + " z " + config.series +
+        " · Na kole: " + activeChoices.length;
     }
   }
 
-  function setResult(text, win) {
+  function showResultOverlay(name) {
+    overlayVisible = true;
     var el = $("result");
-    el.textContent = text;
-    el.className = "result" + (win ? " win" : "");
-    if (win) {
-      el.classList.remove("pop");
-      void el.offsetWidth;
-      el.classList.add("pop");
-    }
+    el.textContent = name;
+    el.className = "result";
+    el.classList.remove("pop");
+    void el.offsetWidth;
+    el.classList.add("pop");
+    $("result-overlay").classList.remove("hidden");
+  }
+
+  function hideResultOverlay() {
+    if (!overlayVisible) return;
+    overlayVisible = false;
+    $("result-overlay").classList.add("hidden");
+    updateButtons();
   }
 
   function onSpinClick() {
-    if (playing || spinning) return; // chroni przed podwójnym startem
+    if (spinning || overlayVisible) return; // obrót w toku albo wynik czeka na zamknięcie
     if (config.choices.length === 0) {
       toast("⚠️ Koło nie ma wyborów");
       return;
     }
-    startGame();
+    if (game == null || game.over) startNewGame();
+    spinCurrent();
   }
 
-  function startGame() {
+  function startNewGame() {
     runId++;
-    var id = runId;
-    clearTimeout(pauseTimer);
-    var seq = Core.buildSequence(config, Math.random);
-    game = { results: seq, index: -1, rounds: seq.length };
-    playing = true;
-    setResult("Kręcimy…", false);
+    hideResultOverlay();
+    game = {
+      series: 1,
+      seq: Core.flattenPairs(config.pairs),
+      seqPos: 0,
+      over: false
+    };
+    activeChoices = config.choices.slice();
+    drawWheel();
     updateRoundInfo();
     updateButtons();
-    playNext(id);
   }
 
-  // Odgrywa kolejną rundę sekwencji albo kończy grę.
-  function playNext(id) {
-    if (id !== runId || !playing || !game) return;
-    var next = game.index + 1;
-    if (next >= game.rounds) {
-      finishGame();
+  // Jeden obrót: wybiera kolejne imię (pary z pomijaniem wylosowanych,
+  // potem losowo spośród pozostałych) i celuje w jego segment na kole.
+  function spinCurrent() {
+    var id = runId;
+    if (spinning || overlayVisible || !game || game.over) return;
+    if (activeChoices.length === 0) {
+      // koło puste — odnów serię albo zakończ grę (defensywnie)
+      if (game.series < config.series) {
+        game.series++;
+        activeChoices = config.choices.slice();
+        game.seqPos = 0;
+        drawWheel();
+      } else {
+        game.over = true;
+      }
+      updateRoundInfo();
+      updateButtons();
       return;
     }
-    spinTo(next, id);
-  }
-
-  function spinTo(index, id) {
-    if (id !== runId || spinning || !game) return;
-    var res = game.results[index];
-    if (!res) { onSpinLanded(index, id); return; }
-    var choiceIndex = config.choices.indexOf(res.name);
+    var pick = Core.pickNextName(game.seq, game.seqPos, activeChoices, Math.random);
+    game.seqPos = pick.pos;
+    var name = pick.name;
+    if (name == null) return;
+    var choiceIndex = activeChoices.indexOf(name);
     if (choiceIndex < 0) choiceIndex = 0;
-    setResult("Kręcimy…", false);
-    animateSpin(choiceIndex, function () { onSpinLanded(index, id); });
+    animateSpin(choiceIndex, function () { onSpinLanded(name, id); });
   }
 
   var TICK_TIMES = [0, 60, 130, 210, 300, 400, 510, 640, 790, 960, 1160, 1390, 1660, 1970, 2330];
@@ -490,9 +514,9 @@
     ensureAudio();
 
     // Kąt docelowy liczony w core.js (jedno źródło prawdy geometrii
-    // lądowania): wskaźnik trafia w środek segmentu celu + drobny jitter,
-    // więc koło graficznie ląduje DOKŁADNIE na wybranym polu.
-    var finalAngle = Core.targetAngleForSpin(choiceIndex, config.choices.length, angle, Math.random);
+    // lądowania) dla AKTUALNEJ liczby segmentów na kole (activeChoices):
+    // wskaźnik trafia w środek segmentu celu + drobny jitter.
+    var finalAngle = Core.targetAngleForSpin(choiceIndex, activeChoices.length, angle, Math.random);
 
     var start = angle;
     var duration = 4200;
@@ -521,35 +545,37 @@
     requestAnimationFrame(frame);
   }
 
-  function onSpinLanded(index, id) {
-    if (id !== runId || !game) return;
-    var res = game.results[index];
-    var name = res && res.name ? res.name : "?";
-    setResult("Wypadło: " + name, true);
-    game.index = index;
+  function onSpinLanded(name, id) {
+    if (id !== runId) return;
     soundDing();
-    updateRoundInfo();
-    if (index + 1 < game.rounds) {
-      pauseTimer = setTimeout(function () { playNext(id); }, PAUSE_MS);
-    } else {
-      finishGame();
+    // eliminacja: wylosowane imię znika z koła
+    var idx = activeChoices.indexOf(name);
+    if (idx >= 0) activeChoices.splice(idx, 1);
+    drawWheel();
+    showResultOverlay(name);
+
+    if (activeChoices.length === 0) {
+      if (game.series < config.series) {
+        // odnowienie koła na kolejną serię (zgodnie z ustawieniami)
+        game.series++;
+        activeChoices = config.choices.slice();
+        game.seqPos = 0;
+        drawWheel();
+      } else {
+        game.over = true;
+      }
     }
+    updateRoundInfo();
     updateButtons();
   }
 
-  function finishGame() {
-    playing = false;
-    updateButtons();
-    // wynik ostatniej rundy zostaje na ekranie; Start jest znów aktywny
-  }
-
-  // Zatrzymuje przebieg (używane przy zapisie nowych ustawień).
+  // Reset stanu gry (po zapisie nowych ustawień).
   function resetPlayState() {
     runId++;
-    clearTimeout(pauseTimer);
-    playing = false;
+    hideResultOverlay();
     game = null;
-    setResult("Naciśnij „Start”, aby zakręcić", false);
+    activeChoices = config.choices.slice();
+    drawWheel();
     updateRoundInfo();
     updateButtons();
   }
@@ -601,7 +627,8 @@
   function openSettings() {
     draft = {
       choices: config.choices.slice(),
-      pairs: config.pairs.map(function (p) { return { a: p.a, b: p.b }; })
+      pairs: config.pairs.map(function (p) { return { a: p.a, b: p.b }; }),
+      series: config.series
     };
     renderSettings();
     $("settings-overlay").classList.remove("hidden");
@@ -615,6 +642,7 @@
   function renderSettings() {
     renderChoices();
     renderPairs();
+    $("input-series").value = draft.series;
   }
 
   function renderChoices() {
@@ -731,7 +759,8 @@
   function saveSettings() {
     var cfg = Core.normalizeConfig({
       choices: draft.choices,
-      pairs: draft.pairs
+      pairs: draft.pairs,
+      series: draft.series
     });
     if (cfg.choices.length === 0) {
       toast("⚠️ Dodaj co najmniej jeden wybór");
@@ -745,7 +774,6 @@
     persistConfig();
     closeSettings();
     resetPlayState();
-    drawWheel();
     toast("✅ Ustawienia zapisane");
   }
 
@@ -773,7 +801,8 @@
   $("btn-restore-defaults").addEventListener("click", function () {
     draft = {
       choices: DEFAULT_CONFIG.choices.slice(),
-      pairs: DEFAULT_CONFIG.pairs.map(function (p) { return { a: p.a, b: p.b }; })
+      pairs: DEFAULT_CONFIG.pairs.map(function (p) { return { a: p.a, b: p.b }; }),
+      series: DEFAULT_CONFIG.series
     };
     renderSettings();
     toast("Przywrócono domyślne — kliknij „Zapisz”");
@@ -793,16 +822,41 @@
     renderSettings();
   });
 
+  $("btn-series-minus").addEventListener("click", function () {
+    draft.series = Math.max(1, draft.series - 1);
+    $("input-series").value = draft.series;
+  });
+
+  $("btn-series-plus").addEventListener("click", function () {
+    draft.series = Math.min(20, draft.series + 1);
+    $("input-series").value = draft.series;
+  });
+
+  $("input-series").addEventListener("input", function () {
+    var v = parseInt(this.value, 10);
+    if (!isNaN(v)) draft.series = Math.min(20, Math.max(1, v));
+  });
+
+  // Overlay wyniku: klik gdziekolwiek zamyka („znika po kolejnym kliknięciu”)
+  $("result-overlay").addEventListener("click", hideResultOverlay);
+
   $("settings-overlay").addEventListener("click", function (e) {
     if (e.target === this) closeSettings();
   });
 
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeSettings();
+    if (e.key === "Escape") {
+      if (overlayVisible) {
+        hideResultOverlay();
+      } else {
+        closeSettings();
+      }
+    }
   });
 
   window.addEventListener("resize", resizeCanvas);
 
   resizeCanvas();
+  updateRoundInfo();
   updateButtons();
 })();

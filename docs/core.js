@@ -1,10 +1,11 @@
 /*!
- * Ruletka v1.2 — logika rdzenia (czysta, testowalna).
+ * Ruletka v1.3 — logika rdzenia (czysta, testowalna).
  * UMD: przeglądarka (window.RouletteCore) i Node (module.exports).
  *
- * Konfiguracja: { choices: string[], pairs: [{ a, b }, ...] }.
- * Kolejność rund = kolejność par; każda para to 2 obroty (najpierw a, potem b).
- * Brak par → jedna runda losowa.
+ * Konfiguracja: { choices: string[], pairs: [{ a, b }, ...], series: 1–20 }.
+ * Kolejność rund = kolejność par (każda para to 2 obroty: a, potem b).
+ * Eliminacja: po wylosowaniu imię znika z koła; gdy koło puste, seria
+ * się odnawia (albo kończy grę — decyduje warstwa UI).
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
@@ -23,9 +24,10 @@
 
   /**
    * Waliduje i normalizuje konfigurację.
-   * raw: { choices: string[], pairs: [{ a, b }, ...] }
+   * raw: { choices: string[], pairs: [{ a, b }, ...], series?: number }
    * Wybory: przycinane i deduplikowane. Pary: a i b muszą być w choices;
    * puste lub nieprawidłowe pary są odrzucane; duplikaty par dozwolone.
+   * series: clampInt 1–20, domyślnie 1.
    */
   function normalizeConfig(raw) {
     raw = raw || {};
@@ -51,7 +53,7 @@
       }
     }
 
-    return { choices: choices, pairs: pairs };
+    return { choices: choices, pairs: pairs, series: clampInt(raw.series, 1, 20, 1) };
   }
 
   /**
@@ -85,6 +87,55 @@
       results.push({ name: pairs[i].b, source: "para" });
     }
     return results;
+  }
+
+  /**
+   * Spłaszcza pary do listy imion: [{a,b},...] → [a1, b1, a2, b2, ...].
+   * Puste wpisy są pomijane.
+   */
+  function flattenPairs(pairs) {
+    var seq = [];
+    if (Array.isArray(pairs)) {
+      for (var i = 0; i < pairs.length; i++) {
+        var p = pairs[i];
+        if (!p || typeof p !== "object") continue;
+        if (p.a) seq.push(p.a);
+        if (p.b) seq.push(p.b);
+      }
+    }
+    return seq;
+  }
+
+  /**
+   * Wybiera kolejne imię do wylosowania przy eliminacji.
+   *   sequence — spłaszczona kolejność par (flattenPairs),
+   *   pos — pozycja startowa w sequence,
+   *   active — imiona wciąż obecne na kole,
+   *   rng — generator liczb [0,1).
+   * Idzie po sequence od pos i pomija imiona spoza active (już wylosowane).
+   * Trafienie → { name, source: "para", pos: (idx + 1) % len }.
+   * Pełne przejście bez trafienia → { name: pickRandom(active, rng),
+   *   source: "losowo", pos bez zmian }.
+   * Puste active → { name: null, source: "losowo", pos }.
+   */
+  function pickNextName(sequence, pos, active, rng) {
+    var r = rng || Math.random;
+    var len = (Array.isArray(sequence) && sequence.length > 0) ? sequence.length : 0;
+    var start = (Number.isInteger(pos) && pos >= 0 && pos < len) ? pos : 0;
+
+    if (!Array.isArray(active) || active.length === 0) {
+      return { name: null, source: "losowo", pos: start };
+    }
+
+    for (var i = 0; i < len; i++) {
+      var idx = (start + i) % len;
+      var name = sequence[idx];
+      if (name && active.indexOf(name) >= 0) {
+        return { name: name, source: "para", pos: (idx + 1) % len };
+      }
+    }
+
+    return { name: pickRandom(active, r), source: "losowo", pos: start };
   }
 
   /**
@@ -125,6 +176,8 @@
     normalizeConfig: normalizeConfig,
     pickRandom: pickRandom,
     buildSequence: buildSequence,
+    flattenPairs: flattenPairs,
+    pickNextName: pickNextName,
     targetAngleForSpin: targetAngleForSpin,
     indexAtPointer: indexAtPointer
   };

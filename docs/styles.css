@@ -155,27 +155,61 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.4);
 }
 
-.result {
-  min-height: 36px;
-  font-size: 26px;
-  font-weight: 800;
+.round-info { color: var(--muted); font-size: 14px; min-height: 18px; }
+
+.controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+/* ---------- overlay wyniku rundy ---------- */
+
+.result-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 20px;
+  cursor: pointer;
   text-align: center;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 
-.result.win { color: var(--gold); }
+.result-overlay.hidden { display: none; }
 
-.result.pop { animation: pop 0.5s ease; }
+.result-box { padding: 24px; }
+
+.result-caption {
+  margin: 0 0 6px;
+  font-size: 20px;
+  letter-spacing: 3px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+#result {
+  margin: 0;
+  font-size: clamp(64px, 18vw, 150px);
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--gold);
+  text-shadow: 0 6px 24px rgba(0, 0, 0, 0.6), 0 0 60px rgba(245, 197, 66, 0.25);
+  overflow-wrap: anywhere;
+}
+
+#result.pop { animation: pop 0.5s ease; }
+
+.result-hint {
+  margin: 26px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  opacity: 0.85;
+}
 
 @keyframes pop {
   0% { transform: scale(0.7); opacity: 0.3; }
   60% { transform: scale(1.08); }
   100% { transform: scale(1); opacity: 1; }
 }
-
-.round-info { color: var(--muted); font-size: 14px; min-height: 18px; }
-
-.controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
 
 /* ---------- przyciski ---------- */
 
@@ -292,7 +326,8 @@ body {
 }
 
 .row input[type="text"],
-.row select {
+.row select,
+.series-row input {
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -304,6 +339,20 @@ body {
 }
 
 .arrow { color: var(--gold); font-weight: 700; flex: none; }
+
+.series-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 230px;
+  margin-bottom: 8px;
+}
+
+.series-row input {
+  width: 70px;
+  flex: none;
+  text-align: center;
+}
 
 /* ---------- toast i stopka ---------- */
 
@@ -338,6 +387,6 @@ body {
   .topbar h1 { font-size: 22px; letter-spacing: 2px; }
   .tagline { font-size: 12px; }
   .layout { padding: 20px 12px; gap: 20px; }
-  .result { font-size: 22px; }
   .settings-btn { font-size: 18px; padding: 7px 10px; }
+  .result-caption { font-size: 16px; }
 }

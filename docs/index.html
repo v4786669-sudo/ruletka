@@ -15,7 +15,7 @@
       <h1>Ruletka</h1>
       <p class="tagline">Zakręć kołem i sprawdź swoje szczęście</p>
     </div>
-    <span class="version">v1.2.1</span>
+    <span class="version">v1.3</span>
     <button type="button" id="btn-settings" class="btn btn-ghost settings-btn" title="Ustawienia" aria-label="Ustawienia">⚙️</button>
   </header>
 
@@ -25,7 +25,6 @@
         <canvas id="wheel" width="520" height="520" role="img" aria-label="Koło ruletki"></canvas>
         <div class="pointer" aria-hidden="true"></div>
       </div>
-      <div id="result" class="result">Naciśnij „Start”, aby zakręcić</div>
       <div id="round-info" class="round-info"></div>
       <div class="controls">
         <button type="button" id="btn-spin" class="btn btn-primary">🎡 Start</button>
@@ -33,7 +32,16 @@
     </section>
   </main>
 
-  <footer class="foot">© Ruletka v1.2.1</footer>
+  <footer class="foot">© Ruletka v1.3</footer>
+
+  <!-- Overlay wyniku rundy: wielka nazwa na przyciemnionym tle -->
+  <div id="result-overlay" class="overlay result-overlay hidden" role="status">
+    <div class="result-box">
+      <p class="result-caption">Wypadło:</p>
+      <div id="result" class="result"></div>
+      <p class="result-hint">Kliknij, aby kontynuować</p>
+    </div>
+  </div>
 
   <!-- Okno ustawień -->
   <div id="settings-overlay" class="overlay hidden">
@@ -53,6 +61,16 @@
           <h3>🎰 Kolejność rund <span class="hint">— każda para to 2 obroty: najpierw pierwsze imię, potem drugie</span></h3>
           <div id="pairs-list"></div>
           <button type="button" id="btn-add-pair" class="btn btn-small">+ Dodaj rundę</button>
+        </section>
+
+        <section>
+          <h3>🔢 Serie</h3>
+          <div class="series-row">
+            <button type="button" id="btn-series-minus" class="btn btn-small">−</button>
+            <input type="number" id="input-series" min="1" max="20" step="1" value="2">
+            <button type="button" id="btn-series-plus" class="btn btn-small">+</button>
+          </div>
+          <p class="hint">Po wylosowaniu wszystkich graczy koło się odnawia i zaczyna się kolejna seria; po ostatniej serii koniec gry.</p>
         </section>
       </div>
       <div class="modal-foot">

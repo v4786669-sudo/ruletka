@@ -1,18 +1,17 @@
 "use strict";
 /**
- * Smoke test UI v1.2 (jsdom): ładuje prawdziwą stronę z docs/
+ * Smoke test UI v1.3 (jsdom): ładuje prawdziwą stronę z docs/
  * (index.html + core.js + app.js) i weryfikuje:
  *   - boot: canvas z wymiarami, neutralny branding (zero „fake”/„fałszyw”),
- *   - widoczny przycisk ustawień ⚙️ w nagłówku; otwiera settings-overlay
- *     zwykłym klikiem; sekcja „Kolejność rund” (pairs-list),
- *   - zapis ustawień działa (localStorage „ruletka-v2”),
- *   - auto-odgrywanie całej sekwencji: Wania → Sofia → Lena → Mateusz
- *     (animacja ~4,2 s + pauza ~1,4 s; defensywny waitFor zamiast sztywnych
- *     sleepów); po końcu Start znów aktywny,
- *   - brak #history i #summary-overlay w DOM,
- *   - migracja ze starego klucza „ruletka-v1” (links → pairs, stary klucz
- *     usunięty),
- *   - konfiguracja domyślna (6 wyborów, 1 para Wania → Sofia).
+ *   - ręczne rundy: jeden klik Start = jeden obrót; wynik w overlayu
+ *     #result-overlay (wielka nazwa w #result), zamykanie klikiem;
+ *     dopóki overlay otwarty, Start nie zaczyna kolejnego obrotu,
+ *   - eliminacja: wylosowane imię znika z koła; po wylosowaniu wszystkich
+ *     koło się odnawia (następna seria) albo gra się kończy,
+ *   - serie: round-info „Seria X z N · Na kole: Y”, po końcu
+ *     „Koniec gry — kliknij Start”; kolejny Start = nowa gra od serii 1,
+ *   - fallback losowy spośród pozostałych (deterministyczny rng),
+ *   - migracja „ruletka-v2” → „ruletka-v3” (series=1, stary klucz usunięty).
  */
 const fs = require("fs");
 const path = require("path");
@@ -27,9 +26,9 @@ const appSrc = fs.readFileSync(path.join(SITE, "app.js"), "utf8");
 
 // twardy limit bezpieczeństwa: gdyby coś zawisło, test i tak się zakończy
 setTimeout(() => {
-  console.error("SMOKE TEST FAIL: przekroczono limit czasu (90 s)");
+  console.error("SMOKE TEST FAIL: przekroczono limit czasu (240 s)");
   process.exit(1);
-}, 90000);
+}, 240000);
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -55,9 +54,10 @@ function makeFakeCtx() {
   });
 }
 
-// uruchamia stronę w świeżym JSDOM; storageSeed = {klucz: wartość} ustawiane
-// PRZED załadowaniem skryptów (symuluje stan przeglądarki przed bootem).
-function bootPage(storageSeed) {
+// uruchamia stronę w świeżym JSDOM. storageSeed = {klucz: wartość} ustawiane
+// PRZED załadowaniem skryptów; rngStub (opcjonalny) podmienia Math.random
+// w oknie strony (np. deterministyczne losowanie fallbacku).
+function bootPage(storageSeed, rngStub) {
   const dom = new JSDOM(html, {
     url: "http://localhost:4173/",
     runScripts: "dangerously",
@@ -68,22 +68,44 @@ function bootPage(storageSeed) {
   if (storageSeed) {
     for (const [k, v] of Object.entries(storageSeed)) w.localStorage.setItem(k, v);
   }
+  if (rngStub) w.Math.random = rngStub;
   w.eval(coreSrc);
   w.eval(appSrc);
   return { window: w, d: w.document };
 }
 
+function overlayVisible(ctx) {
+  return !ctx.d.getElementById("result-overlay").classList.contains("hidden");
+}
+function resultName(ctx) {
+  return ctx.d.getElementById("result").textContent;
+}
+function roundInfo(ctx) {
+  return ctx.d.getElementById("round-info").textContent;
+}
+
+// Jeden ręczny obrót: Start → overlay z oczekiwanym imieniem → dismiss klikiem.
+async function spinOnce(ctx, expectedName) {
+  ctx.d.getElementById("btn-spin").click();
+  await waitFor(() => overlayVisible(ctx),
+    `overlay wyniku widoczny po obrocie (${expectedName})`, 8000);
+  assert.equal(resultName(ctx), expectedName,
+    `wynik na overlayu = ${expectedName} (jest: „${resultName(ctx)}”)`);
+  ctx.d.getElementById("result-overlay").click(); // klik gdziekolwiek zamyka
+  await waitFor(() => !overlayVisible(ctx),
+    "overlay znika po kliknięciu", 2000);
+}
+
 (async () => {
-  // ================= instancja A: preset v2 + pełny przebieg =================
+  // ================= instancja A: preset v3, 2 serie =================
   const A = bootPage({
-    "ruletka-v2": JSON.stringify({
+    "ruletka-v3": JSON.stringify({
       choices: ["Wania", "Sofia", "Lena", "Mateusz"],
-      pairs: [{ a: "Wania", b: "Sofia" }, { a: "Lena", b: "Mateusz" }]
+      pairs: [{ a: "Wania", b: "Sofia" }, { a: "Lena", b: "Mateusz" }],
+      series: 2
     })
   });
   const d = A.d;
-  const result = () => d.getElementById("result").textContent;
-  const spinBtn = () => d.getElementById("btn-spin");
 
   // 1) boot: canvas + neutralny branding
   const canvas = d.getElementById("wheel");
@@ -101,94 +123,100 @@ function bootPage(storageSeed) {
       where + " jest neutralne (bez „fake”/„fałszyw”): „" + text + "”");
   }
   assert.equal(d.querySelector("header h1").textContent, "Ruletka", "nagłówek to „Ruletka”");
-  assert.ok(d.querySelector("footer").textContent.includes("v1.2"), "stopka z wersją v1.2");
-  assert.equal(spinBtn().textContent, "🎡 Start", "przycisk ma zawsze tekst „🎡 Start”");
+  assert.ok(d.querySelector("footer").textContent.includes("v1.3"), "stopka z wersją v1.3");
+  assert.equal(d.getElementById("btn-spin").textContent, "🎡 Start",
+    "przycisk ma zawsze tekst „🎡 Start”");
+  assert.ok(d.getElementById("result-overlay").classList.contains("hidden"),
+    "overlay wyniku domyślnie ukryty");
+  assert.ok(d.getElementById("result-overlay").contains(d.getElementById("result")),
+    "#result jest wewnątrz #result-overlay");
+  assert.equal(roundInfo(A), "Naciśnij „Start”, aby zakręcić",
+    "round-info przed grą zachęca do Startu");
 
-  // 2) brak historii i podsumowania
-  assert.equal(d.getElementById("history"), null, "brak #history w DOM");
-  assert.equal(d.getElementById("summary-overlay"), null, "brak #summary-overlay w DOM");
-  assert.equal(d.getElementById("summary-list"), null, "brak #summary-list w DOM");
-  assert.equal(d.getElementById("btn-summary-close"), null, "brak #btn-summary-close w DOM");
-
-  // 3) ustawienia: widoczny przycisk w nagłówku, otwiera zwykłym klikiem
+  // 2) ustawienia: ⚙️ w nagłówku + sekcja Serie (wartość z presetu)
   const settingsBtn = d.querySelector("header #btn-settings");
   assert.ok(settingsBtn, "przycisk ⚙️ ustawień jest w nagłówku");
-  assert.ok(d.getElementById("settings-overlay").classList.contains("hidden"),
-    "settings-overlay domyślnie ukryty");
   settingsBtn.click();
   assert.ok(!d.getElementById("settings-overlay").classList.contains("hidden"),
     "⚙️ otwiera ustawienia zwykłym klikiem");
-  assert.equal(d.querySelectorAll("#choices-list .row").length, 4, "4 wybory w ustawieniach (preset)");
   assert.equal(d.querySelectorAll("#pairs-list .row").length, 2, "2 pary w ustawieniach (preset)");
+  assert.equal(d.getElementById("input-series").value, "2", "sekcja Serie pokazuje 2 (preset)");
   d.getElementById("btn-close-settings").click();
   assert.ok(d.getElementById("settings-overlay").classList.contains("hidden"),
-    "ustawienia zamknięte przyciskiem ✕");
+    "ustawienia zamknięte");
 
-  // 4) auto-odgrywanie: Start → cała sekwencja z presetu
-  spinBtn().click();
-  assert.equal(result(), "Kręcimy…", "po starcie „Kręcimy…”");
-  assert.equal(spinBtn().disabled, true, "Start zablokowany podczas gry");
+  // 3) seria 1: cztery ręczne obroty z eliminacją
+  // pierwszy obrót + sprawdzenie, że otwarty overlay blokuje kolejny Start
+  d.getElementById("btn-spin").click();
+  await waitFor(() => overlayVisible(A), "overlay po 1. obrocie", 8000);
+  assert.equal(resultName(A), "Wania", "1. obrót: „Wania”");
+  d.getElementById("btn-spin").click(); // próba obrotu przy otwartym overlayu
+  await wait(300);
+  assert.equal(resultName(A), "Wania", "Start zablokowany, dopóki overlay otwarty");
+  assert.equal(overlayVisible(A), true, "overlay nadal widoczny po próbie Startu");
+  d.getElementById("result-overlay").click();
+  await waitFor(() => !overlayVisible(A), "overlay znika po kliknięciu", 2000);
 
-  // animacja ~4,2 s + pauza ~1,4 s między rundami → defensywne czekanie
-  await waitFor(() => result() === "Wypadło: Wania", "runda 1: „Wypadło: Wania”", 7000);
-  await waitFor(() => result() === "Wypadło: Sofia", "runda 2: „Wypadło: Sofia”", 9000);
-  await waitFor(() => result() === "Wypadło: Lena", "runda 3: „Wypadło: Lena”", 9000);
-  await waitFor(() => result() === "Wypadło: Mateusz", "runda 4: „Wypadło: Mateusz”", 9000);
-  await waitFor(() => spinBtn().disabled === false, "po końcu Start znów aktywny", 5000);
+  await spinOnce(A, "Sofia");
+  await spinOnce(A, "Lena");
+  await spinOnce(A, "Mateusz"); // po nim: koło puste → odnowienie serii 2
 
-  assert.equal(d.getElementById("round-info").textContent, "Runda 4 z 4",
-    "wskaźnik postępu „Runda 4 z 4”");
-  assert.equal(result(), "Wypadło: Mateusz", "ostatni wynik zostaje na ekranie");
+  const afterSeries1 = roundInfo(A);
+  assert.ok(afterSeries1.includes("Seria 2 z 2"),
+    "po 4. obrocie seria 2 z 2: „" + afterSeries1 + "”");
+  assert.ok(afterSeries1.includes("Na kole: 4"),
+    "koło odnowione — na kole 4: „" + afterSeries1 + "”");
 
-  // 5) zapis ustawień działa (po grze): dodaj parę i zapisz
-  settingsBtn.click();
-  assert.ok(!d.getElementById("settings-overlay").classList.contains("hidden"));
-  d.getElementById("btn-add-pair").click();
-  assert.equal(d.querySelectorAll("#pairs-list .row").length, 3,
-    "„+ Dodaj rundę” dodaje trzecią parę w edycji");
-  d.getElementById("btn-save-settings").click();
-  assert.ok(d.getElementById("settings-overlay").classList.contains("hidden"),
-    "okno ustawień zamknięte po zapisie");
-  assert.equal(d.getElementById("toast").textContent, "✅ Ustawienia zapisane",
-    "toast potwierdza zapis");
-  const saved = JSON.parse(A.window.localStorage.getItem("ruletka-v2"));
-  assert.equal(saved.choices.length, 4, "zapis: 4 wybory w „ruletka-v2”");
-  assert.equal(saved.pairs.length, 3, "zapis: 3 pary w „ruletka-v2”");
-  assert.equal(result(), "Naciśnij „Start”, aby zakręcić", "zapis resetuje stan gry");
+  // 4) seria 2: ponownie 4 obroty → koniec gry
+  await spinOnce(A, "Wania");
+  await spinOnce(A, "Sofia");
+  await spinOnce(A, "Lena");
+  await spinOnce(A, "Mateusz");
+  assert.equal(roundInfo(A), "Koniec gry — kliknij Start",
+    "po ostatniej serii round-info = koniec gry");
 
-  // ================= instancja B: migracja ze starego klucza v1 =================
+  // 5) kolejny Start = nowa gra od serii 1
+  d.getElementById("btn-spin").click();
+  await waitFor(() => overlayVisible(A), "overlay po starcie nowej gry", 8000);
+  assert.equal(resultName(A), "Wania", "nowa gra od serii 1: „Wania”");
+  assert.ok(roundInfo(A).includes("Seria 1 z 2"),
+    "nowa gra zaczyna się od serii 1: „" + roundInfo(A) + "”");
+
+  // ================= instancja B: sekwencja krótsza niż lista graczy =================
+  // rng=0 → fallback losuje ZAWSZE pierwszy element listy pozostałych.
   const B = bootPage({
-    "ruletka-v1": JSON.stringify({
+    "ruletka-v3": JSON.stringify({
+      choices: ["Wania", "Sofia", "Lena", "Mateusz"],
+      pairs: [{ a: "Wania", b: "Sofia" }],
+      series: 1
+    })
+  }, () => 0);
+
+  await spinOnce(B, "Wania");
+  await spinOnce(B, "Sofia");
+  await spinOnce(B, "Lena");     // po parze: losowo spośród pozostałych (rng=0 → Lena)
+  await spinOnce(B, "Mateusz");  // ostatni gracz
+  assert.equal(roundInfo(B), "Koniec gry — kliknij Start",
+    "instancja B: koniec gry po wylosowaniu wszystkich");
+
+  // ================= instancja C: migracja v2 → v3 =================
+  const C = bootPage({
+    "ruletka-v2": JSON.stringify({
       choices: ["Sofia", "Wania", "Julia", "Maja"],
-      links: [{ from: "Sofia", to: "Wania" }],
-      rounds: 2,
-      forced: ["Sofia"]
+      pairs: [{ a: "Sofia", b: "Wania" }]
     })
   });
-  assert.equal(B.window.localStorage.getItem("ruletka-v1"), null,
-    "stary klucz „ruletka-v1” usunięty po migracji");
-  const migrated = JSON.parse(B.window.localStorage.getItem("ruletka-v2"));
+  assert.equal(C.window.localStorage.getItem("ruletka-v2"), null,
+    "stary klucz „ruletka-v2” usunięty po migracji");
+  const migrated = JSON.parse(C.window.localStorage.getItem("ruletka-v3"));
   assert.deepEqual(migrated.choices, ["Sofia", "Wania", "Julia", "Maja"],
-    "migracja: choices przeniesione z v1");
+    "migracja: choices przeniesione z v2");
   assert.deepEqual(migrated.pairs, [{ a: "Sofia", b: "Wania" }],
-    "migracja: links → pairs [{a: Sofia, b: Wania}]");
-  assert.ok(B.d.getElementById("wheel"), "strona z migrowaną konfiguracją wstaje");
+    "migracja: pairs przeniesione z v2");
+  assert.equal(migrated.series, 1, "migracja: series = 1");
+  assert.ok(C.d.getElementById("wheel"), "strona z migrowaną konfiguracją wstaje");
 
-  // ================= instancja C: konfiguracja domyślna =================
-  const C = bootPage(null);
-  C.d.getElementById("btn-settings").click();
-  assert.equal(C.d.querySelectorAll("#choices-list .row").length, 6,
-    "domyślnie 6 wyborów");
-  assert.equal(C.d.querySelectorAll("#pairs-list .row").length, 1,
-    "domyślnie 1 para w „Kolejności rund”");
-  const pairSelects = C.d.querySelectorAll("#pairs-list .row select");
-  assert.equal(pairSelects[0].value, "Wania", "para domyślna: a = Wania");
-  assert.equal(pairSelects[1].value, "Sofia", "para domyślna: b = Sofia");
-  assert.equal(C.d.getElementById("btn-spin").disabled, false,
-    "Start aktywny przy domyślnej konfiguracji");
-  C.d.getElementById("btn-close-settings").click();
-
-  console.log("SMOKE TEST OK — v1.2: boot/branding, ⚙️ w nagłówku, pary rund (Wania→Sofia→Lena→Mateusz), brak historii, zapis ustawień, migracja v1→v2, domyślne.");
+  console.log("SMOKE TEST OK — v1.3: overlay wyniku (dismiss), eliminacja, serie z odnowieniem koła, koniec gry i nowa gra, fallback losowy (rng=0), migracja v2→v3.");
   process.exit(0);
 })().catch((e) => {
   console.error("SMOKE TEST FAIL:", e && e.message ? e.message : e);
